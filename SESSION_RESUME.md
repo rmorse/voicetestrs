@@ -6,12 +6,17 @@ Building an offline voice-to-notes transcription app in **Rust** on **Windows**.
 ## Current Status (August 9, 2025)
 ✅ **Phase 1 COMPLETE** - Core audio recording
 ✅ **Phase 2 COMPLETE** - Whisper transcription integration
+✅ **Phase 3 COMPLETE** - System integration (tray, hotkeys, notifications)
 
 ### What's Working:
 - Audio recording with CPAL (16kHz mono WAV)
 - Whisper.cpp v1.7.6 binary integration
 - Full transcription pipeline
 - CLI commands for recording and transcription
+- System tray with dynamic icon
+- Global hotkeys (Ctrl+Shift+R for recording)
+- Desktop notifications
+- Background service mode
 
 ## Your Hardware
 - **Microphone**: Headset (4- OpenRun Pro by Shokz) - 16kHz mono (DEFAULT)
@@ -25,6 +30,9 @@ Building an offline voice-to-notes transcription app in **Rust** on **Windows**.
 
 ## CLI Commands (All Working!)
 ```bash
+# Run in background mode with system tray
+cargo run -- --background
+
 # List audio devices
 cargo run -- --list-devices
 
@@ -37,6 +45,11 @@ cargo run -- --record 5
 # Transcribe existing audio file
 cargo run -- --transcribe path/to/audio.wav
 ```
+
+## Hotkeys (Background Mode)
+- **Ctrl+Shift+R** - Toggle recording on/off
+- **Ctrl+Shift+N** - Quick note (10 sec recording)
+- **Ctrl+Shift+V** - Show window (placeholder)
 
 ## Key Implementation Details
 - **Whisper Integration**: Using subprocess calls to whisper-cli.exe
@@ -109,4 +122,5 @@ voicetextrs/
 **Last Updated**: August 9, 2025
 **Phase 1**: ✅ COMPLETE (Audio Recording)
 **Phase 2**: ✅ COMPLETE (Transcription)
-**Phase 3**: Ready to start (System Integration)
+**Phase 3**: ✅ COMPLETE (System Integration)
+**Phase 4**: Ready to start (Tauri UI)

@@ -5,10 +5,18 @@ use tracing_subscriber;
 use std::path::PathBuf;
 
 mod core;
+mod platform;
+mod app;
+
+use app::App;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Run in background mode with system tray
+    #[arg(short, long)]
+    background: bool,
+    
     /// Test audio recording for N seconds
     #[arg(short, long)]
     test: Option<u64>,
@@ -44,53 +52,36 @@ async fn main() -> Result<()> {
     
     let args = Args::parse();
     
-    if args.list_devices {
-        core::audio::list_audio_devices()?;
+    // Check if running in background mode
+    if args.background {
+        info!("Starting in background mode with system tray");
+        let mut app = App::new()?;
+        app.run().await?;
         return Ok(());
     }
     
-    if let Some(duration) = args.test {
-        info!("Testing audio recording for {} seconds", duration);
-        core::audio::test_recording(duration, args.device.clone())?;
+    // Otherwise run CLI commands
+    if args.list_devices || args.test.is_some() || args.transcribe.is_some() || args.record.is_some() {
+        app::run_cli_command(
+            args.record,
+            args.transcribe,
+            args.test,
+            args.list_devices,
+            args.device,
+        ).await?;
         return Ok(());
     }
     
-    if let Some(audio_file) = args.transcribe {
-        info!("Transcribing audio file: {}", audio_file);
-        let transcriber = core::transcription::Transcriber::new()?;
-        let result = transcriber.transcribe(&PathBuf::from(audio_file)).await?;
-        println!("\n=== Transcription ===");
-        println!("{}", result.text);
-        println!("====================\n");
-        info!("Language: {}, Duration: {:.1}s", result.language, result.duration);
-        return Ok(());
-    }
-    
-    if let Some(duration) = args.record {
-        info!("Recording and transcribing for {} seconds", duration);
-        
-        // Record audio
-        let audio_path = core::audio::test_recording(duration, args.device)?;
-        info!("Audio saved to: {:?}", audio_path);
-        
-        // Transcribe the recording
-        let transcriber = core::transcription::Transcriber::new()?;
-        let result = transcriber.transcribe(&audio_path).await?;
-        
-        println!("\n=== Transcription ===");
-        println!("{}", result.text);
-        println!("====================\n");
-        
-        // Save transcription to text file
-        let text_path = audio_path.with_extension("txt");
-        std::fs::write(&text_path, &result.text)?;
-        info!("Transcription saved to: {:?}", text_path);
-        
-        return Ok(());
-    }
-    
-    // TODO: Implement main application loop
+    // No command specified - show help
     warn!("No command specified. Use --help for options.");
+    println!("\nQuick start:");
+    println!("  cargo run -- --background      # Run with system tray");
+    println!("  cargo run -- --record 5        # Record and transcribe");
+    println!("  cargo run -- --list-devices    # List audio devices");
+    println!("\nIn background mode:");
+    println!("  Ctrl+Shift+R - Toggle recording");
+    println!("  Ctrl+Shift+N - Quick note (10 sec)");
+    println!("  Ctrl+Shift+V - Show window");
     
     Ok(())
 }
