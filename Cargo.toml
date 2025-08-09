@@ -13,7 +13,7 @@ categories = ["multimedia::audio", "accessibility"]
 # Core Audio & Processing
 cpal = "0.16.0"              # Cross-platform audio I/O
 hound = "3.5.1"              # WAV file reading/writing
-# whisper-rs = { version = "0.14.4", optional = true }  # Whisper bindings (requires CMake)
+# whisper-rs = { version = "0.14.4", optional = true }  # Disabled due to Rust 2024 compatibility issues
 
 # Async Runtime
 tokio = { version = "1.47.1", features = ["full"] }
@@ -72,8 +72,8 @@ debug = true
 # harness = false
 
 [features]
-default = []  # No default features for now
-# whisper-bindings = ["dep:whisper-rs"]  # Use whisper-rs bindings (requires CMake)
+default = ["whisper-binary"]  # Use whisper binary by default
+# whisper-bindings = ["dep:whisper-rs"]  # Disabled due to Rust 2024 compatibility
 whisper-binary = []          # Use external whisper binary
 # cuda = ["whisper-rs/cuda"]   # CUDA acceleration
 # metal = ["whisper-rs/metal"] # Metal acceleration (macOS)

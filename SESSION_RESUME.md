@@ -1,76 +1,112 @@
 # Session Resume - VoiceTextRS Project
 
 ## Quick Context
-Building an offline voice-to-notes transcription app in **Rust** (not Python!) on **Windows** (not WSL).
+Building an offline voice-to-notes transcription app in **Rust** on **Windows**.
 
 ## Current Status (August 9, 2025)
-✅ **Phase 1 COMPLETE** - Core audio recording is fully functional!
-- Successfully tested 3-second recording with your Shokz OpenRun Pro headset
-- Audio saves to `notes\2025\2025-08-09\*.wav` at 16kHz mono (perfect for Whisper)
-- CLI working: `cargo run -- --test 3` or `cargo run -- --list-devices`
+✅ **Phase 1 COMPLETE** - Core audio recording
+✅ **Phase 2 COMPLETE** - Whisper transcription integration
+
+### What's Working:
+- Audio recording with CPAL (16kHz mono WAV)
+- Whisper.cpp v1.7.6 binary integration
+- Full transcription pipeline
+- CLI commands for recording and transcription
 
 ## Your Hardware
-- **Microphone**: Headset (4- OpenRun Pro by Shokz) - 16kHz mono (DEFAULT) - PERFECT!
+- **Microphone**: Headset (4- OpenRun Pro by Shokz) - 16kHz mono (DEFAULT)
 - **Alternative**: HDMI (Cam Link 4K) - 48kHz stereo
 
-## Next Priority: Whisper Integration
-You need to choose ONE:
+## Whisper Setup (COMPLETED)
+- Using whisper.cpp v1.7.6 (downloaded from ggml-org/whisper.cpp)
+- Binary location: `whisper/Release/whisper-cli.exe`
+- Model: `whisper/models/ggml-base.en.bin` (74MB)
+- Working transcription tested successfully
 
-### Option A: Install CMake (for native whisper-rs)
-1. Download CMake from https://cmake.org/download/
-2. Uncomment whisper-rs in Cargo.toml (line 16)
-3. Uncomment features in Cargo.toml (lines 76-79)
-4. Run `cargo build`
-
-### Option B: Use Whisper Binary (easier, no CMake)
-1. Download from: https://github.com/Purfview/whisper-standalone-win/releases
-2. Extract to `whisper/` folder
-3. We'll implement subprocess calling
-
-## Key Files to Review
-- `plan.md` - Full implementation plan with Rust details
-- `background-research.md` - Technical notes, crate versions, known issues
-- `src/core/audio.rs` - Working audio recording implementation
-- `Cargo.toml` - Dependencies (whisper-rs currently commented out)
-
-## Known Issues
-1. **whisper-rs needs CMake** - Not installed yet
-2. **Windows Defender** - May flag builds (you fixed this already)
-3. **WebFetch tool** - Returns 404 for crates.io (use PowerShell instead)
-
-## Commands That Work
+## CLI Commands (All Working!)
 ```bash
 # List audio devices
 cargo run -- --list-devices
 
-# Test recording (X seconds)
+# Test recording only (X seconds)
 cargo run -- --test 5
 
-# Build project
-cargo build --release
+# Record and transcribe (X seconds)
+cargo run -- --record 5
+
+# Transcribe existing audio file
+cargo run -- --transcribe path/to/audio.wav
 ```
+
+## Key Implementation Details
+- **Whisper Integration**: Using subprocess calls to whisper-cli.exe
+- **Why not whisper-rs?**: Rust 2024 edition compatibility issues with unsafe extern blocks
+- **Audio Format**: 16kHz mono WAV (optimal for Whisper)
+- **File Organization**: `notes/YYYY/YYYY-MM-DD/HHMMSS-voice-note.wav`
 
 ## Architecture Decisions
 - **Language**: Rust (performance, single binary)
-- **UI**: Tauri 2.0 (future Android support)
-- **Audio**: CPAL 0.16.0 (working!)
-- **Transcription**: whisper-rs 0.14.4 OR binary fallback
+- **Audio**: CPAL 0.16.0
+- **Transcription**: whisper.cpp binary (subprocess)
+- **Future UI**: Tauri 2.0 (for Android support)
 - **Platform**: Windows-first, cross-platform architecture
 
-## What's Next After Whisper?
-1. Phase 2: Transcription Integration
-2. Phase 3: System tray & global hotkeys
-3. Phase 4: Tauri UI
-4. Phase 5: Voice Activity Detection
-5. Phase 6: Distribution/Installer
+## Next Phases
+### Phase 3: System Integration
+- [ ] System tray icon
+- [ ] Global hotkeys (start/stop recording)
+- [ ] Windows notifications
 
-## Quick Questions to Answer
-1. Did you install CMake? (for whisper-rs)
-2. Or do you want to use whisper.exe binary?
-3. Any issues with the audio recording?
+### Phase 4: Tauri UI
+- [ ] Basic web UI
+- [ ] Recording controls
+- [ ] Transcription display
+- [ ] Settings panel
+
+### Phase 5: Voice Activity Detection
+- [ ] Auto-start/stop recording
+- [ ] Silence detection
+- [ ] Audio level monitoring
+
+### Phase 6: Distribution
+- [ ] Windows installer
+- [ ] Auto-updates
+- [ ] Settings persistence
+
+## Known Issues & Solutions
+1. ✅ **SOLVED**: whisper-rs Rust 2024 compatibility → Using whisper.cpp binary
+2. ✅ **SOLVED**: CMake requirement → Not needed with binary approach
+3. ✅ **SOLVED**: Windows Defender flags → Fixed in previous session
+
+## Project Structure
+```
+voicetextrs/
+├── src/
+│   ├── core/
+│   │   ├── audio.rs          # Audio recording (COMPLETE)
+│   │   ├── transcription.rs  # Whisper integration (COMPLETE)
+│   │   ├── config.rs         # Configuration (placeholder)
+│   │   └── notes.rs          # Note management (placeholder)
+│   ├── platform/             # Platform-specific (placeholders)
+│   └── main.rs              # CLI interface (COMPLETE)
+├── whisper/
+│   ├── Release/
+│   │   └── whisper-cli.exe  # Whisper binary
+│   └── models/
+│       └── ggml-base.en.bin # Base English model
+├── notes/                    # Recorded audio & transcriptions
+└── Cargo.toml               # Dependencies configured
+
+```
+
+## Quick Questions Answered
+1. **CMake installed?** Yes, but not needed anymore
+2. **Whisper working?** Yes, using whisper.cpp binary
+3. **Audio recording issues?** None, working perfectly
 
 ---
 **Project Root**: D:\projects\claude\voicetextrs
-**Last Session**: August 9, 2025
-**Phase 1**: ✅ COMPLETE
-**Phase 2**: Ready to start (pending Whisper decision)
+**Last Updated**: August 9, 2025
+**Phase 1**: ✅ COMPLETE (Audio Recording)
+**Phase 2**: ✅ COMPLETE (Transcription)
+**Phase 3**: Ready to start (System Integration)

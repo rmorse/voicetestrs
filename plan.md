@@ -4,6 +4,14 @@
 
 A desktop application that captures audio from the microphone, transcribes it using offline Whisper, and saves the transcriptions as organized markdown notes. Built with Rust for performance, reliability, and cross-platform compatibility.
 
+## Current Status (August 9, 2025)
+- ✅ **Phase 1: Audio Recording** - COMPLETE
+- ✅ **Phase 2: Transcription** - COMPLETE (using whisper.cpp binary)
+- ⏳ **Phase 3: System Integration** - Next
+- ⏳ **Phase 4: UI** - Pending
+- ⏳ **Phase 5: VAD** - Pending
+- ⏳ **Phase 6: Distribution** - Pending
+
 ## Core Requirements
 
 - Real-time or near-real-time voice capture

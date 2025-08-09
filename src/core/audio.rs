@@ -217,7 +217,7 @@ pub fn list_audio_devices() -> Result<()> {
 }
 
 /// Test recording for specified duration
-pub fn test_recording(duration_secs: u64, device_name: Option<String>) -> Result<()> {
+pub fn test_recording(duration_secs: u64, device_name: Option<String>) -> Result<PathBuf> {
     info!("Starting {} second recording test", duration_secs);
     
     let mut recorder = match device_name {
@@ -244,7 +244,7 @@ pub fn test_recording(duration_secs: u64, device_name: Option<String>) -> Result
     println!("Size: {:.2} MB", metadata.len() as f64 / 1_048_576.0);
     println!("Duration: {} seconds", duration_secs);
     
-    Ok(())
+    Ok(output_path)
 }
 
 #[cfg(test)]
