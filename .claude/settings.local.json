@@ -9,7 +9,9 @@
       "Bash(dir:*)",
       "Bash(cargo fix:*)",
       "Bash(cmake:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(cargo search:*)",
+      "Bash(git reset:*)"
     ],
     "deny": []
   }

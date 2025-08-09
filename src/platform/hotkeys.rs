@@ -1,10 +1,8 @@
 use anyhow::{Result, Context};
-use global_hotkey::{
-    GlobalHotKeyManager, HotKeyState,
-    hotkey::{HotKey, Code, Modifiers},
-};
+use win_hotkeys::{HotkeyManager as WinHotkeyManager, VKey};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
+use std::thread;
 use tracing::{info, error};
 
 #[derive(Debug, Clone)]
@@ -15,23 +13,16 @@ pub enum HotkeyEvent {
 }
 
 pub struct HotkeyManager {
-    manager: GlobalHotKeyManager,
-    hotkeys: Vec<HotKey>,
     event_sender: Sender<HotkeyEvent>,
     event_receiver: Arc<Mutex<Receiver<HotkeyEvent>>>,
-    enabled: bool,
+    pub enabled: bool,
 }
 
 impl HotkeyManager {
     pub fn new() -> Result<Self> {
-        let manager = GlobalHotKeyManager::new()
-            .context("Failed to create global hotkey manager")?;
-        
         let (tx, rx) = mpsc::channel();
         
         Ok(Self {
-            manager,
-            hotkeys: Vec::new(),
             event_sender: tx,
             event_receiver: Arc::new(Mutex::new(rx)),
             enabled: true,
@@ -39,59 +30,77 @@ impl HotkeyManager {
     }
     
     pub fn register_defaults(&mut self) -> Result<()> {
-        // Default hotkeys
-        self.register_recording_hotkey()?;
-        self.register_quick_note_hotkey()?;
-        self.register_show_window_hotkey()?;
+        // Clone sender for the thread
+        let tx1 = self.event_sender.clone();
+        let tx2 = self.event_sender.clone();
+        let tx3 = self.event_sender.clone();
         
-        info!("Default hotkeys registered");
-        Ok(())
-    }
-    
-    fn register_recording_hotkey(&mut self) -> Result<()> {
-        // Ctrl+Shift+R for recording toggle
-        let hotkey = HotKey::new(
-            Some(Modifiers::CONTROL | Modifiers::SHIFT),
-            Code::KeyR
-        );
-        
-        self.manager.register(hotkey)
-            .context("Failed to register recording hotkey")?;
-        
-        self.hotkeys.push(hotkey);
-        info!("Registered hotkey: Ctrl+Shift+R for recording toggle");
-        
-        Ok(())
-    }
-    
-    fn register_quick_note_hotkey(&mut self) -> Result<()> {
-        // Ctrl+Shift+N for quick note
-        let hotkey = HotKey::new(
-            Some(Modifiers::CONTROL | Modifiers::SHIFT),
-            Code::KeyN
-        );
-        
-        self.manager.register(hotkey)
-            .context("Failed to register quick note hotkey")?;
-        
-        self.hotkeys.push(hotkey);
-        info!("Registered hotkey: Ctrl+Shift+N for quick note");
-        
-        Ok(())
-    }
-    
-    fn register_show_window_hotkey(&mut self) -> Result<()> {
-        // Ctrl+Shift+V for show window
-        let hotkey = HotKey::new(
-            Some(Modifiers::CONTROL | Modifiers::SHIFT),
-            Code::KeyV
-        );
-        
-        self.manager.register(hotkey)
-            .context("Failed to register show window hotkey")?;
-        
-        self.hotkeys.push(hotkey);
-        info!("Registered hotkey: Ctrl+Shift+V for show window");
+        // Start hotkey manager in a separate thread (required for event loop)
+        thread::spawn(move || {
+            let mut manager = WinHotkeyManager::new();
+            
+            // Register Ctrl+Shift+R for recording toggle
+            let result1 = manager.register_hotkey(
+                VKey::R,
+                &[VKey::LControl, VKey::LShift],
+                {
+                    let tx = tx1.clone();
+                    move || {
+                        if let Err(e) = tx.send(HotkeyEvent::RecordingToggle) {
+                            error!("Failed to send recording event: {}", e);
+                        }
+                    }
+                }
+            );
+            
+            match result1 {
+                Ok(_) => {},
+                Err(e) => error!("Failed to register Ctrl+Shift+R: {:?}", e),
+            }
+            
+            // Register Ctrl+Shift+N for quick note
+            let result2 = manager.register_hotkey(
+                VKey::N,
+                &[VKey::LControl, VKey::LShift],
+                {
+                    let tx = tx2.clone();
+                    move || {
+                        if let Err(e) = tx.send(HotkeyEvent::QuickNote) {
+                            error!("Failed to send quick note event: {}", e);
+                        }
+                    }
+                }
+            );
+            
+            match result2 {
+                Ok(_) => {},
+                Err(e) => error!("Failed to register Ctrl+Shift+N: {:?}", e),
+            }
+            
+            // Register Ctrl+Shift+V for show window
+            let result3 = manager.register_hotkey(
+                VKey::V,
+                &[VKey::LControl, VKey::LShift],
+                {
+                    let tx = tx3.clone();
+                    move || {
+                        if let Err(e) = tx.send(HotkeyEvent::ShowWindow) {
+                            error!("Failed to send show window event: {}", e);
+                        }
+                    }
+                }
+            );
+            
+            match result3 {
+                Ok(_) => {},
+                Err(e) => error!("Failed to register Ctrl+Shift+V: {:?}", e),
+            }
+            
+            info!("Hotkeys registered: Ctrl+Shift+R (record), Ctrl+Shift+N (quick note), Ctrl+Shift+V (show)");
+            
+            // This blocks and processes Windows messages for hotkeys
+            manager.event_loop();
+        });
         
         Ok(())
     }
@@ -101,25 +110,7 @@ impl HotkeyManager {
             return Ok(None);
         }
         
-        // Check if any hotkey was pressed
-        if let Ok(event) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
-            if event.state == HotKeyState::Pressed {
-                // Map hotkey ID to event
-                // For simplicity, we'll check against our registered hotkeys
-                if self.hotkeys.len() > 0 && event.id == self.hotkeys[0].id() {
-                    info!("Recording hotkey pressed");
-                    return Ok(Some(HotkeyEvent::RecordingToggle));
-                } else if self.hotkeys.len() > 1 && event.id == self.hotkeys[1].id() {
-                    info!("Quick note hotkey pressed");
-                    return Ok(Some(HotkeyEvent::QuickNote));
-                } else if self.hotkeys.len() > 2 && event.id == self.hotkeys[2].id() {
-                    info!("Show window hotkey pressed");
-                    return Ok(Some(HotkeyEvent::ShowWindow));
-                }
-            }
-        }
-        
-        // Check for events from other parts of the app
+        // Check for events from hotkey callbacks
         if let Ok(rx) = self.event_receiver.lock() {
             if let Ok(event) = rx.try_recv() {
                 return Ok(Some(event));
@@ -135,12 +126,9 @@ impl HotkeyManager {
     }
     
     pub fn unregister_all(&mut self) -> Result<()> {
-        for hotkey in &self.hotkeys {
-            self.manager.unregister(*hotkey)
-                .context("Failed to unregister hotkey")?;
-        }
-        self.hotkeys.clear();
-        info!("All hotkeys unregistered");
+        // Note: With the thread-based approach, we'd need a different mechanism
+        // to stop the event loop and unregister hotkeys
+        info!("Hotkeys will be unregistered when thread exits");
         Ok(())
     }
     
@@ -153,9 +141,6 @@ impl HotkeyManager {
 
 impl Drop for HotkeyManager {
     fn drop(&mut self) {
-        // Clean up hotkeys on drop
-        if let Err(e) = self.unregister_all() {
-            error!("Failed to unregister hotkeys on drop: {}", e);
-        }
+        // Hotkeys are automatically unregistered when the thread exits
     }
 }

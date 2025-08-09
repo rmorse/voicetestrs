@@ -48,6 +48,8 @@ impl App {
         self.tray_manager.init()?;
         self.hotkey_manager.register_defaults()?;
         
+        // windows-hotkeys handles the message pump internally
+        
         // Show startup notification
         notifications::show_notification(
             "VoiceTextRS Started",
@@ -58,11 +60,13 @@ impl App {
         while !self.shutdown.load(Ordering::Relaxed) {
             // Handle tray events
             if let Some(command) = self.tray_manager.handle_events()? {
+                info!("Tray command: {:?}", command);
                 self.handle_tray_command(command).await?;
             }
             
             // Handle hotkey events
             if let Some(event) = self.hotkey_manager.handle_events()? {
+                info!("Hotkey triggered: {:?}", event);
                 self.handle_hotkey_event(event).await?;
             }
             

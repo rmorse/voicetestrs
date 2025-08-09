@@ -20,12 +20,13 @@ tokio = { version = "1.47.1", features = ["full"] }
 
 # System Integration
 tray-icon = "0.21.1"         # System tray
-global-hotkey = "0.7.0"      # Global hotkeys
+# global-hotkey = "0.7.0"      # Has threading issues on Windows
+win-hotkeys = "0.5.1"        # Better Windows hotkey support
 notify-rust = "4.11.7"       # Desktop notifications
 
 # UI (Initially commented out - add when ready for Tauri)
 # tauri = { version = "2.7.0", features = ["dialog", "notification", "system-tray"] }
-# winit = "0.30.12"            # Window management (for Tauri)
+winit = "0.30.12"            # Window management and event loop
 
 # Utilities
 serde = { version = "1.0.219", features = ["derive"] }

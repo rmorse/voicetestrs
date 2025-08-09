@@ -90,6 +90,7 @@ cargo run -- --transcribe path/to/audio.wav
 1. ✅ **SOLVED**: whisper-rs Rust 2024 compatibility → Using whisper.cpp binary
 2. ✅ **SOLVED**: CMake requirement → Not needed with binary approach
 3. ✅ **SOLVED**: Windows Defender flags → Fixed in previous session
+4. ✅ **SOLVED**: Hotkeys not working → Switched from global-hotkey to win-hotkeys 0.5.1
 
 ## Project Structure
 ```

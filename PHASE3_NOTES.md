@@ -93,6 +93,14 @@ cargo run -- --list-devices
 3. **Show Window**: Placeholder - needs Tauri UI implementation
 4. **Settings**: No persistent settings yet
 
+## Important Implementation Details
+
+### Hotkey Library Choice
+- **win-hotkeys 0.5.1** is used (NOT win-hotkey singular or windows-hotkeys)
+- Runs event loop in separate thread
+- Uses `register_hotkey()` method with VKey enums
+- Handles Windows message pump internally
+
 ## Testing Notes
 
 - System tray icon appears in Windows taskbar notification area
