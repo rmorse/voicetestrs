@@ -1,0 +1,60 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project-specific
+/models/*.bin
+/models/*.ggml
+/models/*.gguf
+/notes/**/*.wav
+/notes/**/*.mp3
+/notes/**/*.m4a
+/config.toml.local
+*.log
+
+# Whisper models (large files)
+whisper/
+*.pt
+*.onnx
+
+# Test outputs
+/test_output/
+/tmp/
+/temp/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Tauri
+/tauri/target/
+/web/node_modules/
+/web/dist/
+
+# Python (if any scripts remain)
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Audio test files (but keep examples)
+*.wav
+*.mp3
+!examples/*.wav
+!examples/*.mp3
