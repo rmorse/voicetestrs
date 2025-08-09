@@ -764,4 +764,38 @@ cargo tauri build
 
 ---
 
+## Session Context & Decisions (January 2025)
+
+### Key Decisions Made
+1. **Switched from Python to Rust** - For performance, single binary distribution, and memory safety
+2. **Chose Tauri 2.0 over other UI frameworks** - Best cross-platform support with Android beta
+3. **Using whisper-rs bindings** - Native Rust integration, with binary fallback if needed
+4. **Windows-first development** - Primary platform is Windows, not WSL
+5. **Recording modes** - Implementing both push-to-talk AND VAD with toggle option
+
+### Important Context
+- **Host System**: Windows (native), not WSL - better API access
+- **Crate Versions**: All verified via crates.io API (January 2025)
+- **WebFetch Issue**: crates.io returns 404 with WebFetch tool, use PowerShell/curl instead
+- **Architecture**: Clean separation between core/platform/UI for future portability
+
+### Next Immediate Steps
+1. Create Cargo.toml with dependencies from this plan
+2. Set up basic project structure as outlined
+3. Implement Phase 1 (Core Audio) - start with simple CLI test
+4. Test CPAL audio capture on Windows with default microphone
+
+### Alternative UI Frameworks Considered
+- **Slint (1.12.1)**: Native performance, Android support, but newer/smaller community
+- **Dioxus (0.6.3)**: React-like, multiple targets, but mobile support is newer
+- **EGUI (0.32.0)**: Immediate mode, simple, but experimental mobile support
+
+### Why These Specific Crates
+- **cpal**: Most mature cross-platform audio library for Rust
+- **whisper-rs**: Active maintenance (updated July 2025), good FFI bindings
+- **tray-icon**: Works well with both Tauri and standalone apps
+- **global-hotkey**: Cross-platform hotkey support without admin requirements
+
+---
+
 *This plan is a living document and will be updated as the project evolves.*
