@@ -11,7 +11,15 @@
       "Bash(cmake:*)",
       "Bash(git add:*)",
       "Bash(cargo search:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(cargo install:*)",
+      "Bash(rustc --version)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(mv:*)",
+      "Bash(rmdir:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run tauri:dev:*)"
     ],
     "deny": []
   }

@@ -58,3 +58,6 @@ venv/
 *.mp3
 !examples/*.wav
 !examples/*.mp3
+
+node_modules
+/notes/

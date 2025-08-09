@@ -1,0 +1,28 @@
+{
+  "name": "voicetextrs",
+  "version": "1.0.0",
+  "description": "An offline voice-to-notes transcription application built with Rust, featuring OpenAI's Whisper for high-quality speech recognition. Record with hotkeys, transcribe offline, and manage notes - all from your system tray!",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.7.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.1.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.7.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}
