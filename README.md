@@ -18,7 +18,8 @@ An offline voice-to-notes transcription application built with Rust, featuring O
 ### Prerequisites
 
 - Windows 10/11 (primary platform)
-- Rust 1.75+ (install from [rustup.rs](https://rustup.rs/))
+- Rust 1.82+ (install from [rustup.rs](https://rustup.rs/))
+- Node.js 20+ and npm (for Tauri UI)
 - Visual Studio 2022 Build Tools (for Windows compilation)
 - ~200MB disk space for Whisper model
 
@@ -29,18 +30,41 @@ An offline voice-to-notes transcription application built with Rust, featuring O
 git clone https://github.com/yourusername/voicetextrs.git
 cd voicetextrs
 
-# Build the project
+# Build the core project
 cargo build --release
 
 # Download Whisper binary (see WHISPER_SETUP.md for details)
 # 1. Download from: https://github.com/ggerganov/whisper.cpp/releases
 # 2. Extract to whisper/Release/ folder
 # 3. Model will auto-download on first use
+
+# For GUI version (Tauri)
+cd tauri
+npm install
 ```
 
 ## 📖 Usage
 
-### Background Mode (Recommended)
+### GUI Mode (Tauri) - NEW! 🎉
+
+```bash
+# Run the Tauri GUI application
+cd tauri
+npm run tauri:dev
+
+# Build for production
+npm run tauri:build
+```
+
+**Features:**
+- Modern React-based interface
+- Real-time transcription display
+- Recording controls with visual feedback
+- Transcription history
+- Dynamic port selection (no conflicts!)
+- Keyboard shortcuts display
+
+### Background Mode (System Tray)
 
 ```bash
 # Run in system tray
@@ -50,7 +74,7 @@ cargo run -- --background
 **Available Hotkeys:**
 - `Ctrl+Shift+R` - Toggle recording on/off
 - `Ctrl+Shift+N` - Quick note (10-second recording)
-- `Ctrl+Shift+V` - Show window (coming soon)
+- `Ctrl+Shift+V` - Show window (Tauri GUI)
 
 **System Tray Features:**
 - Blue microphone icon (turns red when recording)
@@ -78,7 +102,7 @@ cargo run -- --test 3
 
 ```
 voicetextrs/
-├── src/
+├── src/                # Core Rust application
 │   ├── core/           # Core functionality
 │   │   ├── audio.rs        # Audio recording (CPAL)
 │   │   ├── transcription.rs # Whisper integration
@@ -90,6 +114,19 @@ voicetextrs/
 │   │   └── notifications.rs # Desktop notifications
 │   ├── app.rs          # Main application controller
 │   └── main.rs         # Entry point
+├── tauri/              # Tauri GUI application
+│   ├── src/            # React frontend
+│   │   ├── App.jsx         # Main React component
+│   │   ├── App.css         # Styling
+│   │   └── main.jsx        # Entry point
+│   ├── src-tauri/      # Tauri backend
+│   │   ├── src/
+│   │   │   ├── commands.rs # Tauri IPC commands
+│   │   │   ├── lib.rs      # Tauri app setup
+│   │   │   └── main.rs     # Entry point
+│   │   └── tauri.conf.json # Tauri configuration
+│   ├── package.json    # Node dependencies
+│   └── vite.config.js  # Vite bundler config
 ├── whisper/
 │   ├── Release/        # Whisper.cpp binaries
 │   │   └── whisper-cli.exe
@@ -153,10 +190,12 @@ cargo test
 - Desktop notifications
 - Background service mode
 
-⏳ **Phase 4: UI** - Next
-- Tauri-based GUI
-- Transcription history viewer
-- Settings panel
+✅ **Phase 4: Tauri UI** - Complete
+- React-based GUI with modern design
+- Real-time transcription display
+- Recording controls with visual feedback
+- Dynamic port selection (no conflicts!)
+- Tauri IPC for frontend-backend communication
 
 ⏳ **Phase 5: Voice Activity Detection** - Planned
 - Auto-start/stop recording

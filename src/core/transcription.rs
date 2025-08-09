@@ -12,18 +12,34 @@ pub struct Transcriber {
 
 impl Transcriber {
     pub fn new() -> Result<Self> {
-        // Look for whisper-cli.exe in the whisper/Release directory
-        let whisper_path = PathBuf::from("whisper/Release/whisper-cli.exe");
-        if !whisper_path.exists() {
-            bail!(
-                "Whisper binary not found at {:?}. Please check the whisper/Release folder.",
-                whisper_path
-            );
-        }
+        // Try to find whisper in multiple locations
+        let possible_paths = vec![
+            PathBuf::from("whisper/Release/whisper-cli.exe"),
+            PathBuf::from("../../whisper/Release/whisper-cli.exe"),
+            PathBuf::from("../../../whisper/Release/whisper-cli.exe"),
+        ];
+        
+        let whisper_path = possible_paths
+            .iter()
+            .find(|p| p.exists())
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Whisper binary not found. Tried paths: {:?}",
+                    possible_paths
+                )
+            })?;
+        
+        info!("Found whisper binary at: {:?}", whisper_path);
         
         // Default to base.en model
         let model_type = "base.en".to_string();
-        let model_path = PathBuf::from(format!("whisper/models/ggml-{}.bin", model_type));
+        
+        // Try to find the model in the same relative location as whisper
+        let whisper_dir = whisper_path.parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow::anyhow!("Invalid whisper path"))?;
+        let model_path = whisper_dir.join(format!("models/ggml-{}.bin", model_type));
         
         if !model_path.exists() {
             warn!("Model {:?} not found. Will download on first use.", model_path);
@@ -37,12 +53,23 @@ impl Transcriber {
     }
     
     pub fn with_model(model_type: &str) -> Result<Self> {
-        let whisper_path = PathBuf::from("whisper/Release/whisper-cli.exe");
-        if !whisper_path.exists() {
-            bail!("Whisper binary not found");
-        }
+        // Try to find whisper in multiple locations
+        let possible_paths = vec![
+            PathBuf::from("whisper/Release/whisper-cli.exe"),
+            PathBuf::from("../../whisper/Release/whisper-cli.exe"),
+            PathBuf::from("../../../whisper/Release/whisper-cli.exe"),
+        ];
         
-        let model_path = PathBuf::from(format!("whisper/models/ggml-{}.bin", model_type));
+        let whisper_path = possible_paths
+            .iter()
+            .find(|p| p.exists())
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Whisper binary not found"))?;
+        
+        let whisper_dir = whisper_path.parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow::anyhow!("Invalid whisper path"))?;
+        let model_path = whisper_dir.join(format!("models/ggml-{}.bin", model_type));
         
         Ok(Self {
             whisper_path,

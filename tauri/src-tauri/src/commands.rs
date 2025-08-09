@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, Emitter};
 use serde::{Deserialize, Serialize};
 
 // Import our existing modules from the main project
 use voicetextrs::core::audio::AudioRecorder;
-use voicetextrs::core::transcription::WhisperTranscriber;
+use voicetextrs::core::transcription::Transcriber;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranscriptionResult {
@@ -15,7 +15,7 @@ pub struct TranscriptionResult {
 
 pub struct AppState {
     pub recorder: Arc<Mutex<Option<AudioRecorder>>>,
-    pub transcriber: Arc<WhisperTranscriber>,
+    pub transcriber: Arc<Transcriber>,
 }
 
 #[tauri::command]
@@ -29,7 +29,7 @@ pub async fn start_recording(
         return Err("Already recording".to_string());
     }
 
-    let recorder = AudioRecorder::new()
+    let mut recorder = AudioRecorder::new()
         .map_err(|e| format!("Failed to create recorder: {}", e))?;
     
     recorder.start_recording()
@@ -52,7 +52,7 @@ pub async fn stop_recording(
 ) -> Result<TranscriptionResult, String> {
     let mut recorder_lock = state.recorder.lock().await;
     
-    let recorder = recorder_lock.take()
+    let mut recorder = recorder_lock.take()
         .ok_or_else(|| "Not recording".to_string())?;
     
     let audio_path = recorder.stop_recording()

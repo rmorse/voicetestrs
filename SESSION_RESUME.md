@@ -7,6 +7,7 @@ Building an offline voice-to-notes transcription app in **Rust** on **Windows**.
 ✅ **Phase 1 COMPLETE** - Core audio recording
 ✅ **Phase 2 COMPLETE** - Whisper transcription integration
 ✅ **Phase 3 COMPLETE** - System integration (tray, hotkeys, notifications)
+✅ **Phase 4 COMPLETE** - Tauri GUI application
 
 ### What's Working:
 - Audio recording with CPAL (16kHz mono WAV)
@@ -17,6 +18,9 @@ Building an offline voice-to-notes transcription app in **Rust** on **Windows**.
 - Global hotkeys (Ctrl+Shift+R for recording)
 - Desktop notifications
 - Background service mode
+- **NEW: Tauri GUI with React frontend**
+- **NEW: Dynamic port selection (no conflicts!)**
+- **NEW: Real-time transcription display**
 
 ## Your Hardware
 - **Microphone**: Headset (4- OpenRun Pro by Shokz) - 16kHz mono (DEFAULT)
@@ -28,7 +32,16 @@ Building an offline voice-to-notes transcription app in **Rust** on **Windows**.
 - Model: `whisper/models/ggml-base.en.bin` (74MB)
 - Working transcription tested successfully
 
-## CLI Commands (All Working!)
+## Running the Application
+
+### GUI Mode (Tauri) - RECOMMENDED
+```bash
+cd tauri
+npm run tauri:dev  # Development mode
+npm run tauri:build # Production build
+```
+
+### CLI Commands (All Working!)
 ```bash
 # Run in background mode with system tray
 cargo run -- --background
@@ -64,17 +77,20 @@ cargo run -- --transcribe path/to/audio.wav
 - **Future UI**: Tauri 2.0 (for Android support)
 - **Platform**: Windows-first, cross-platform architecture
 
-## Next Phases
-### Phase 3: System Integration
-- [ ] System tray icon
-- [ ] Global hotkeys (start/stop recording)
-- [ ] Windows notifications
+## Project Architecture
 
-### Phase 4: Tauri UI
-- [ ] Basic web UI
-- [ ] Recording controls
-- [ ] Transcription display
-- [ ] Settings panel
+### Tauri Integration (NEW!)
+The project now features a complete Tauri GUI application with:
+- **Frontend**: React + Vite for modern UI
+- **Backend**: Rust Tauri for native integration
+- **IPC**: Commands bridge frontend to core functionality
+- **Dynamic Ports**: Automatic port selection prevents conflicts
+
+### Key Technical Solutions
+1. **Dynamic Port Selection**: Using `portpicker` crate to find available ports
+2. **Path Resolution**: Whisper binary path handles multiple working directories
+3. **Tauri Plugin Localhost**: Ensures proper localhost server handling
+4. **Process Management**: Vite dev server spawned from Rust for unified startup
 
 ### Phase 5: Voice Activity Detection
 - [ ] Auto-start/stop recording
@@ -95,14 +111,21 @@ cargo run -- --transcribe path/to/audio.wav
 ## Project Structure
 ```
 voicetextrs/
-├── src/
+├── src/                      # Core Rust application
 │   ├── core/
 │   │   ├── audio.rs          # Audio recording (COMPLETE)
 │   │   ├── transcription.rs  # Whisper integration (COMPLETE)
 │   │   ├── config.rs         # Configuration (placeholder)
 │   │   └── notes.rs          # Note management (placeholder)
-│   ├── platform/             # Platform-specific (placeholders)
+│   ├── platform/             # Platform-specific (COMPLETE)
+│   │   ├── tray.rs          # System tray
+│   │   ├── hotkeys.rs       # Global hotkeys
+│   │   └── notifications.rs # Desktop notifications
 │   └── main.rs              # CLI interface (COMPLETE)
+├── tauri/                    # Tauri GUI application (COMPLETE)
+│   ├── src/                 # React frontend
+│   ├── src-tauri/           # Tauri backend
+│   └── package.json         # Node dependencies
 ├── whisper/
 │   ├── Release/
 │   │   └── whisper-cli.exe  # Whisper binary
@@ -124,4 +147,5 @@ voicetextrs/
 **Phase 1**: ✅ COMPLETE (Audio Recording)
 **Phase 2**: ✅ COMPLETE (Transcription)
 **Phase 3**: ✅ COMPLETE (System Integration)
-**Phase 4**: Ready to start (Tauri UI)
+**Phase 4**: ✅ COMPLETE (Tauri UI with dynamic ports!)
+**Phase 5**: Ready to start (Voice Activity Detection)
