@@ -13,7 +13,7 @@ categories = ["multimedia::audio", "accessibility"]
 # Core Audio & Processing
 cpal = "0.16.0"              # Cross-platform audio I/O
 hound = "3.5.1"              # WAV file reading/writing
-whisper-rs = "0.14.4"        # Whisper bindings
+# whisper-rs = { version = "0.14.4", optional = true }  # Whisper bindings (requires CMake)
 
 # Async Runtime
 tokio = { version = "1.47.1", features = ["full"] }
@@ -66,17 +66,17 @@ panic = "abort"              # Smaller binary, no unwinding
 opt-level = 0
 debug = true
 
-# Benchmarks
-[[bench]]
-name = "audio_processing"
-harness = false
+# Benchmarks (uncomment when ready)
+# [[bench]]
+# name = "audio_processing"
+# harness = false
 
 [features]
-default = ["whisper-bindings"]
-whisper-bindings = []        # Use whisper-rs bindings
+default = []  # No default features for now
+# whisper-bindings = ["dep:whisper-rs"]  # Use whisper-rs bindings (requires CMake)
 whisper-binary = []          # Use external whisper binary
-cuda = ["whisper-rs/cuda"]   # CUDA acceleration
-metal = ["whisper-rs/metal"] # Metal acceleration (macOS)
+# cuda = ["whisper-rs/cuda"]   # CUDA acceleration
+# metal = ["whisper-rs/metal"] # Metal acceleration (macOS)
 
 # Package metadata for installers
 [package.metadata.wix]

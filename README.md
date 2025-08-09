@@ -86,13 +86,25 @@ cargo tauri build
 
 ## Roadmap
 
-- [ ] Core audio recording
-- [ ] Whisper integration
+- [x] Core audio recording (CPAL working!)
+- [ ] Whisper integration (needs CMake for whisper-rs)
 - [ ] System tray implementation
 - [ ] Global hotkey support
 - [ ] Tauri UI
 - [ ] Voice Activity Detection
 - [ ] Android support (via Tauri 2.0)
+
+## Current Status
+
+✅ **Phase 1 Complete**: Core audio recording is working!
+- Audio capture with CPAL
+- WAV file generation with proper format (16kHz mono)
+- CLI interface for testing
+- Directory structure with date organization
+
+### Known Requirements
+- **CMake**: Required for building whisper-rs. Install from https://cmake.org/download/
+- **Visual Studio Build Tools**: Already installed ✓
 
 ## License
 

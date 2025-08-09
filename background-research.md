@@ -1,6 +1,6 @@
 # Background Research & Technical Notes
 
-## Crate Research (January 2025)
+## Crate Research (August 2025)
 
 ### Version Discovery Method
 Due to WebFetch tool issues with crates.io, we used PowerShell to query the crates.io API:
@@ -151,10 +151,21 @@ powershell -Command "(Invoke-WebRequest -Uri 'https://crates.io/api/v1/crates/CR
 ### 2. CPAL on Windows
 - **Issue**: Some USB microphones report incorrect sample rates
 - **Workaround**: Allow user to manually select audio device and sample rate
+- **Status**: ✅ WORKING - Successfully tested with Shokz OpenRun Pro headset at 16kHz
 
 ### 3. Global Hotkeys
 - **Issue**: May conflict with other applications
 - **Solution**: Make hotkeys configurable, provide alternative activation methods
+
+### 4. whisper-rs Build Requirements
+- **Issue**: whisper-rs requires CMake to build whisper.cpp
+- **Error**: `failed to execute command: program not found - is cmake not installed?`
+- **Solution**: Install CMake from https://cmake.org/download/
+- **Alternative**: Use whisper binary fallback instead of native bindings
+
+### 5. Antivirus False Positives
+- **Issue**: Windows Defender may flag cargo build process
+- **Solution**: Add project folder to exclusions or temporarily disable real-time protection during build
 
 ### 4. Whisper Model Sizes
 - **tiny.bin**: 39 MB - Fast but less accurate
@@ -255,5 +266,5 @@ Get-AuthenticodeSignature .\target\release\voicetextrs.exe
 
 ---
 
-*Last updated: January 2025*
+*Last updated: August 2025*
 *This document contains research findings and technical notes from the initial planning phase.*
