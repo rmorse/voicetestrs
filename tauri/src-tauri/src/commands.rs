@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{AppHandle, Manager, State, Emitter};
+use tauri::{AppHandle, State, Emitter};
 use serde::{Deserialize, Serialize};
 
 // Import our existing modules from the main project
@@ -16,6 +16,7 @@ pub struct TranscriptionResult {
 pub struct AppState {
     pub recorder: Arc<Mutex<Option<AudioRecorder>>>,
     pub transcriber: Arc<Transcriber>,
+    pub is_recording: Arc<Mutex<bool>>,
 }
 
 #[tauri::command]
@@ -23,6 +24,11 @@ pub async fn start_recording(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // Check if already recording
+    if *state.is_recording.lock().await {
+        return Err("Already recording".to_string());
+    }
+    
     let mut recorder_lock = state.recorder.lock().await;
     
     if recorder_lock.is_some() {
@@ -36,6 +42,7 @@ pub async fn start_recording(
         .map_err(|e| format!("Failed to start recording: {}", e))?;
     
     *recorder_lock = Some(recorder);
+    *state.is_recording.lock().await = true;
     
     // Emit event to frontend
     app.emit("recording-status", serde_json::json!({
@@ -50,6 +57,14 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TranscriptionResult, String> {
+    // Check if actually recording
+    if !*state.is_recording.lock().await {
+        return Err("Not recording".to_string());
+    }
+    
+    // Set flag to false immediately to prevent double-stops
+    *state.is_recording.lock().await = false;
+    
     let mut recorder_lock = state.recorder.lock().await;
     
     let mut recorder = recorder_lock.take()
@@ -121,6 +136,5 @@ pub async fn transcribe_file(
 pub async fn get_recording_status(
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let recorder_lock = state.recorder.lock().await;
-    Ok(recorder_lock.is_some())
+    Ok(*state.is_recording.lock().await)
 }

@@ -28,9 +28,30 @@ function App() {
       }
     })
 
+    // Listen for recording started event (from tray/hotkeys)
+    const unlistenStarted = listen('recording-started', () => {
+      setIsRecording(true)
+      setRecordingDuration(0)
+    })
+
+    // Listen for recording stopped event (from tray/hotkeys)
+    const unlistenStopped = listen('recording-stopped', (event) => {
+      setIsRecording(false)
+      setRecordingDuration(0)
+      // Add the transcription to the list
+      setTranscriptions(prev => [{
+        id: Date.now(),
+        text: event.payload.transcription,
+        timestamp: new Date().toLocaleString(),
+        audioPath: event.payload.audio_path
+      }, ...prev])
+    })
+
     return () => {
       unlisten.then(fn => fn())
       unlistenStatus.then(fn => fn())
+      unlistenStarted.then(fn => fn())
+      unlistenStopped.then(fn => fn())
     }
   }, [])
 

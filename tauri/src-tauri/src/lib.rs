@@ -5,7 +5,13 @@ use std::process::Command;
 use tokio::sync::Mutex;
 use voicetextrs::core::transcription::Transcriber;
 use commands::AppState;
-use tauri::Manager;
+use tauri::{
+    Manager, Emitter,
+    tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
+    menu::{Menu, PredefinedMenuItem, MenuItemBuilder},
+    AppHandle,
+};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,6 +60,7 @@ pub fn run() {
   let app_state = AppState {
     recorder: Arc::new(Mutex::new(None)),
     transcriber: Arc::new(Transcriber::new().expect("Failed to create transcriber")),
+    is_recording: Arc::new(Mutex::new(false)),
   };
 
   let mut context = tauri::generate_context!();
@@ -66,6 +73,7 @@ pub fn run() {
 
   tauri::Builder::default()
     .plugin(tauri_plugin_localhost::Builder::new(port).build())
+    .plugin(tauri_plugin_global_shortcut::Builder::new().build())
     .manage(app_state)
     .invoke_handler(tauri::generate_handler![
       commands::start_recording,
@@ -83,8 +91,299 @@ pub fn run() {
         )?;
       }
       
+      // Set up system tray
+      setup_system_tray(app)?;
+      
+      // Set up global hotkeys
+      setup_global_hotkeys(app)?;
+      
+      // Check for --background flag
+      let args: Vec<String> = std::env::args().collect();
+      if args.contains(&"--background".to_string()) {
+        // Start with window hidden
+        if let Some(window) = app.get_webview_window("main") {
+          window.hide().unwrap();
+        }
+      }
+      
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      // Handle window close event - hide instead of quit
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        // Hide the window instead of closing
+        window.hide().unwrap();
+        // Prevent the default close behavior
+        api.prevent_close();
+      }
     })
     .run(context)
     .expect("error while running tauri application");
+}
+
+fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // Create the tray menu
+    let show_hide = MenuItemBuilder::with_id("show_hide", "Show/Hide Window").build(app)?;
+    let separator1 = PredefinedMenuItem::separator(app)?;
+    let start_recording = MenuItemBuilder::with_id("start_recording", "Start Recording").build(app)?;
+    let stop_recording = MenuItemBuilder::with_id("stop_recording", "Stop Recording")
+        .enabled(false)
+        .build(app)?;
+    let quick_note = MenuItemBuilder::with_id("quick_note", "Quick Note (10s)").build(app)?;
+    let separator2 = PredefinedMenuItem::separator(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
+    let separator3 = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+    
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show_hide,
+            &separator1,
+            &start_recording,
+            &stop_recording,
+            &quick_note,
+            &separator2,
+            &settings,
+            &separator3,
+            &quit,
+        ],
+    )?;
+    
+    // Create the system tray
+    let _tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(move |app, event| {
+            match event.id.as_ref() {
+                "show_hide" => {
+                    toggle_window_visibility(app);
+                }
+                "start_recording" => {
+                    // Trigger start recording command
+                    let app_handle = app.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = start_recording_from_tray(&app_handle).await {
+                            eprintln!("Failed to start recording: {}", e);
+                        }
+                    });
+                }
+                "stop_recording" => {
+                    // Trigger stop recording command
+                    let app_handle = app.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = stop_recording_from_tray(&app_handle).await {
+                            eprintln!("Failed to stop recording: {}", e);
+                        }
+                    });
+                }
+                "quick_note" => {
+                    // Trigger quick note command
+                    let app_handle = app.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = quick_note_from_tray(&app_handle).await {
+                            eprintln!("Failed to start quick note: {}", e);
+                        }
+                    });
+                }
+                "settings" => {
+                    // Show settings (for now just show the main window)
+                    if let Some(window) = app.get_webview_window("main") {
+                        window.show().unwrap();
+                        window.set_focus().unwrap();
+                    }
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } => {
+                    // Single left click - do nothing (menu is on right click)
+                }
+                TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    // Double click - toggle window visibility
+                    toggle_window_visibility(&tray.app_handle());
+                }
+                _ => {}
+            }
+        })
+        .tooltip("VoiceTextRS - Click to show menu")
+        .build(app)?;
+    
+    Ok(())
+}
+
+fn setup_global_hotkeys(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let shortcuts = app.global_shortcut();
+    
+    // Register Ctrl+Shift+R for recording toggle
+    let record_shortcut = Shortcut::new(Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT), tauri_plugin_global_shortcut::Code::KeyR);
+    shortcuts.on_shortcut(record_shortcut, move |app_handle, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            println!("Recording hotkey pressed");
+            let handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                toggle_recording(&handle).await;
+            });
+        }
+    })?;
+    
+    // Register Ctrl+Shift+N for quick note
+    let note_shortcut = Shortcut::new(Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT), tauri_plugin_global_shortcut::Code::KeyN);
+    shortcuts.on_shortcut(note_shortcut, move |app_handle, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            println!("Quick note hotkey pressed");
+            let handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = quick_note_from_tray(&handle).await {
+                    eprintln!("Failed to start quick note: {}", e);
+                }
+            });
+        }
+    })?;
+    
+    // Register Ctrl+Shift+V for show/hide window
+    let window_shortcut = Shortcut::new(Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT), tauri_plugin_global_shortcut::Code::KeyV);
+    shortcuts.on_shortcut(window_shortcut, move |app_handle, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            println!("Show/hide window hotkey pressed");
+            toggle_window_visibility(&app_handle);
+        }
+    })?;
+    
+    println!("Global hotkeys registered successfully");
+    Ok(())
+}
+
+fn toggle_window_visibility(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            window.hide().unwrap();
+        } else {
+            window.show().unwrap();
+            window.set_focus().unwrap();
+        }
+    }
+}
+
+async fn toggle_recording(app: &AppHandle) {
+    // Check if currently recording
+    let state = app.state::<AppState>();
+    let is_recording = *state.is_recording.lock().await;
+    
+    if is_recording {
+        println!("Stopping recording via hotkey");
+        if let Err(e) = stop_recording_from_tray(app).await {
+            eprintln!("Failed to stop recording: {}", e);
+        }
+    } else {
+        println!("Starting recording via hotkey");
+        if let Err(e) = start_recording_from_tray(app).await {
+            eprintln!("Failed to start recording: {}", e);
+        }
+    }
+}
+
+async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let state = app.state::<AppState>();
+    
+    // Check if already recording
+    if *state.is_recording.lock().await {
+        println!("Already recording, ignoring start request");
+        return Ok(());
+    }
+    
+    // Start recording
+    let mut recorder = voicetextrs::core::audio::AudioRecorder::new()?;
+    recorder.start_recording()?;
+    *state.recorder.lock().await = Some(recorder);
+    *state.is_recording.lock().await = true;
+    
+    // TODO: Update menu items when Tauri supports dynamic menu updates
+    // Currently, Tauri v2 doesn't support runtime menu item state changes
+    
+    // Emit event to update UI if window is visible
+    app.emit("recording-started", ())?;
+    
+    println!("Recording started from tray");
+    Ok(())
+}
+
+async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let state = app.state::<AppState>();
+    
+    // Check if actually recording
+    if !*state.is_recording.lock().await {
+        println!("Not recording, ignoring stop request");
+        return Ok(());
+    }
+    
+    // Set recording flag to false immediately to prevent double-stops
+    *state.is_recording.lock().await = false;
+    
+    // Stop recording
+    let path = if let Some(mut recorder) = state.recorder.lock().await.take() {
+        recorder.stop_recording()?
+    } else {
+        return Err("No active recording".into());
+    };
+    
+    // TODO: Update menu items when Tauri supports dynamic menu updates
+    // Currently, Tauri v2 doesn't support runtime menu item state changes
+    
+    // Transcribe
+    let result = state.transcriber.transcribe(&path).await?;
+    
+    // Save transcription
+    let text_path = path.with_extension("txt");
+    std::fs::write(&text_path, &result.text)?;
+    
+    // Save metadata
+    let meta_path = path.with_extension("json");
+    let metadata = serde_json::json!({
+        "audio_file": path.to_string_lossy(),
+        "text_file": text_path.to_string_lossy(),
+        "language": result.language,
+        "duration": result.duration,
+        "timestamp": chrono::Local::now().to_rfc3339(),
+    });
+    std::fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
+    
+    // Emit event to update UI if window is visible
+    app.emit("recording-stopped", serde_json::json!({
+        "transcription": result.text,
+        "audio_path": path.to_string_lossy(),
+        "text_path": text_path.to_string_lossy(),
+    }))?;
+    
+    println!("Recording stopped and transcribed from tray");
+    Ok(())
+}
+
+async fn quick_note_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    // Start recording
+    start_recording_from_tray(app).await?;
+    
+    // Schedule stop after 10 seconds
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        if let Err(e) = stop_recording_from_tray(&app_handle).await {
+            eprintln!("Failed to stop quick note recording: {}", e);
+        }
+    });
+    
+    println!("Quick note started - will stop in 10 seconds");
+    Ok(())
 }
