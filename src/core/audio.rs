@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::thread;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use chrono::Local;
 
 const SAMPLE_RATE: u32 = 16000;  // Optimal for Whisper
@@ -154,7 +154,12 @@ impl AudioRecorder {
     /// Generate output path with timestamp
     fn generate_output_path(&self) -> Result<PathBuf> {
         let timestamp = Local::now();
-        let date_dir = PathBuf::from("notes")
+        
+        // Find the project root by looking for whisper directory
+        let project_root = Self::find_project_root()?;
+        
+        let date_dir = project_root
+            .join("notes")
             .join(timestamp.format("%Y").to_string())
             .join(timestamp.format("%Y-%m-%d").to_string());
         
@@ -164,6 +169,27 @@ impl AudioRecorder {
             timestamp.format("%H%M%S"));
         
         Ok(date_dir.join(filename))
+    }
+    
+    /// Find the project root directory by looking for the whisper folder
+    fn find_project_root() -> Result<PathBuf> {
+        // Try current directory and parent directories
+        let possible_roots = vec![
+            PathBuf::from("."),                    // Current dir (when run from project root)
+            PathBuf::from("../.."),                // When run from tauri/src-tauri
+            PathBuf::from("../../.."),              // When run from deeper directories
+        ];
+        
+        for root in possible_roots {
+            let whisper_path = root.join("whisper");
+            if whisper_path.exists() {
+                return Ok(root.canonicalize()?);
+            }
+        }
+        
+        // Fallback to current directory if whisper not found
+        warn!("Could not find project root with whisper directory, using current directory");
+        Ok(PathBuf::from(".").canonicalize()?)
     }
     
     /// Get current recording duration
