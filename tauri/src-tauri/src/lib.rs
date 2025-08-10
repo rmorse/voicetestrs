@@ -122,13 +122,10 @@ pub fn run() {
 }
 
 fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    // Create the tray menu
+    // Create the tray menu with a single toggle item
     let show_hide = MenuItemBuilder::with_id("show_hide", "Show/Hide Window").build(app)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
-    let start_recording = MenuItemBuilder::with_id("start_recording", "Start Recording").build(app)?;
-    let stop_recording = MenuItemBuilder::with_id("stop_recording", "Stop Recording")
-        .enabled(false)
-        .build(app)?;
+    let toggle_recording_item = MenuItemBuilder::with_id("toggle_recording", "Toggle Recording").build(app)?;
     let quick_note = MenuItemBuilder::with_id("quick_note", "Quick Note (10s)").build(app)?;
     let separator2 = PredefinedMenuItem::separator(app)?;
     let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
@@ -140,8 +137,7 @@ fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
         &[
             &show_hide,
             &separator1,
-            &start_recording,
-            &stop_recording,
+            &toggle_recording_item,
             &quick_note,
             &separator2,
             &settings,
@@ -159,22 +155,11 @@ fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
                 "show_hide" => {
                     toggle_window_visibility(app);
                 }
-                "start_recording" => {
-                    // Trigger start recording command
+                "toggle_recording" => {
+                    // Toggle recording state
                     let app_handle = app.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = start_recording_from_tray(&app_handle).await {
-                            eprintln!("Failed to start recording: {}", e);
-                        }
-                    });
-                }
-                "stop_recording" => {
-                    // Trigger stop recording command
-                    let app_handle = app.app_handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = stop_recording_from_tray(&app_handle).await {
-                            eprintln!("Failed to stop recording: {}", e);
-                        }
+                        toggle_recording(&app_handle).await;
                     });
                 }
                 "quick_note" => {
@@ -304,7 +289,7 @@ async fn toggle_recording(app: &AppHandle) {
     }
 }
 
-async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<AppState>();
     
     // Check if already recording
@@ -319,8 +304,7 @@ async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::e
     *state.recorder.lock().await = Some(recorder);
     *state.is_recording.lock().await = true;
     
-    // TODO: Update menu items when Tauri supports dynamic menu updates
-    // Currently, Tauri v2 doesn't support runtime menu item state changes
+    // TODO: Update tray menu text when Tauri supports it
     
     // Emit event to update UI if window is visible
     app.emit("recording-started", ())?;
@@ -329,7 +313,7 @@ async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<AppState>();
     
     // Check if actually recording
@@ -348,8 +332,7 @@ async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::er
         return Err("No active recording".into());
     };
     
-    // TODO: Update menu items when Tauri supports dynamic menu updates
-    // Currently, Tauri v2 doesn't support runtime menu item state changes
+    // TODO: Update tray menu text when Tauri supports it
     
     // Transcribe
     let result = state.transcriber.transcribe(&path).await?;

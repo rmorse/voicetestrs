@@ -21,7 +21,9 @@
       "Bash(npm run dev:*)",
       "Bash(npm run tauri:dev:*)",
       "Bash(npx tauri:*)",
-      "Bash(npm run tauri:*)"
+      "Bash(npm run tauri:*)",
+      "Bash(cargo check:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

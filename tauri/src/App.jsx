@@ -77,29 +77,17 @@ function App() {
     try {
       setError(null)
       if (isRecording) {
-        const result = await invoke('stop_recording')
-        // The stop_recording command returns the transcription result
-        // Update the UI state
-        setIsRecording(false)
-        setRecordingDuration(0)
-        if (result) {
-          setTranscriptions(prev => [{
-            id: Date.now(),
-            text: result.text,
-            timestamp: new Date().toLocaleString(),
-            audioPath: result.audio_path
-          }, ...prev])
-        }
+        // Just call stop_recording, don't handle the result
+        // The transcription will be added via the "transcription-complete" event listener
+        // The recording state will be updated via the "recording-status" event listener
+        await invoke('stop_recording')
       } else {
+        // Just call start_recording
+        // The recording state will be updated via the "recording-status" event listener
         await invoke('start_recording')
-        setIsRecording(true)
-        setRecordingDuration(0)
       }
     } catch (err) {
       setError(err.toString())
-      // Reset recording state on error
-      setIsRecording(false)
-      setRecordingDuration(0)
     }
   }
 
