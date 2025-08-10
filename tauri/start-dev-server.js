@@ -5,6 +5,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import readline from 'readline';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,21 +78,129 @@ function waitForServer(port, maxAttempts = 60) {
 }
 
 async function main() {
+  let viteProcess = null;
+  
+  // Cleanup function
+  const cleanup = (exitCode = 0) => {
+    console.log('\nShutting down dev server...');
+    
+    // Clean up port file
+    const portFile = path.join(__dirname, '.current-port');
+    if (fs.existsSync(portFile)) {
+      try {
+        fs.unlinkSync(portFile);
+        console.log('Cleaned up port file');
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+    
+    // Kill Vite process
+    if (viteProcess && !viteProcess.killed) {
+      console.log(`Terminating Vite process (PID: ${viteProcess.pid})...`);
+      
+      try {
+        // On Windows, use taskkill to kill the entire process tree
+        if (process.platform === 'win32') {
+          const killProcess = spawn('taskkill', ['/pid', viteProcess.pid.toString(), '/f', '/t'], {
+            stdio: 'inherit'  // Show output for debugging
+          });
+          
+          killProcess.on('exit', () => {
+            console.log('Vite process terminated');
+            process.exit(exitCode);
+          });
+          
+          // Fallback exit after timeout
+          setTimeout(() => {
+            console.log('Forcing exit...');
+            process.exit(exitCode);
+          }, 2000);
+        } else {
+          // On Unix, kill the process group
+          process.kill(-viteProcess.pid, 'SIGTERM');
+          setTimeout(() => {
+            process.exit(exitCode);
+          }, 1000);
+        }
+      } catch (err) {
+        console.error('Error killing process:', err);
+        process.exit(exitCode);
+      }
+    } else {
+      console.log('No Vite process to terminate');
+      process.exit(exitCode);
+    }
+  };
+  
+  // Track if cleanup has been called to prevent multiple calls
+  let cleanupCalled = false;
+  
+  // Wrapper to ensure cleanup is only called once
+  const cleanupOnce = (code) => {
+    if (!cleanupCalled) {
+      cleanupCalled = true;
+      cleanup(code);
+    }
+  };
+  
+  // Register signal handlers for graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('Received SIGINT signal');
+    cleanupOnce(0);
+  });
+  
+  process.on('SIGTERM', () => {
+    console.log('Received SIGTERM signal');
+    cleanupOnce(0);
+  });
+  
+  // Windows-specific handling
+  if (process.platform === 'win32') {
+    // Handle Ctrl+C in Windows console
+    process.on('SIGBREAK', () => {
+      console.log('Received SIGBREAK signal (Windows Ctrl+Break)');
+      cleanupOnce(0);
+    });
+    
+    // Also try readline interface
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    
+    rl.on('SIGINT', () => {
+      console.log('Received SIGINT via readline');
+      cleanupOnce(0);
+    });
+  }
+  
   try {
+    // Clean up any stale port file from previous runs
+    const portFile = path.join(__dirname, '.current-port');
+    if (fs.existsSync(portFile)) {
+      try {
+        fs.unlinkSync(portFile);
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+    
     // Find an available port
     const port = await findAvailablePort();
     console.log(`Found available port: ${port}`);
     
     // Write port to temp file for Tauri to read
-    const portFile = path.join(__dirname, '.current-port');
     fs.writeFileSync(portFile, port.toString());
     
     // Start Vite with the selected port
     console.log(`Starting Vite dev server on port ${port}...`);
-    const viteProcess = spawn('npm', ['run', 'dev'], {
+    viteProcess = spawn('npm', ['run', 'dev'], {
       env: { ...process.env, VITE_PORT: port.toString() },
       cwd: __dirname,
-      shell: true
+      shell: true,
+      detached: process.platform !== 'win32',  // Detach on Unix for process group
+      windowsHide: true  // Hide console window on Windows
     });
     
     viteProcess.stdout.on('data', (data) => {
@@ -104,7 +213,14 @@ async function main() {
     
     viteProcess.on('error', (error) => {
       console.error(`Failed to start Vite: ${error}`);
-      process.exit(1);
+      cleanup(1);
+    });
+    
+    viteProcess.on('exit', (code, signal) => {
+      console.log(`Vite process exited with code ${code} and signal ${signal}`);
+      if (code !== null && code !== 0) {
+        cleanup(code);
+      }
     });
     
     // Wait for server to be ready
@@ -117,7 +233,7 @@ async function main() {
     
   } catch (error) {
     console.error('Error:', error);
-    process.exit(1);
+    cleanup(1);
   }
 }
 
