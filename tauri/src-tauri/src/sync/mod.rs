@@ -3,13 +3,18 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::{AppHandle, Emitter};
 
 use crate::database::{Database, models::{Transcription, SyncReport}, utils};
+use crate::queue_manager::{QueueManager, BackgroundTask, TaskType, TaskPriority, TaskStatus};
+use uuid::Uuid;
+use serde_json::json;
+use chrono::Local;
 
 pub struct FileSystemSync {
     db: Arc<Database>,
     notes_dir: PathBuf,
+    queue_manager: Option<Arc<QueueManager>>,
 }
 
 impl FileSystemSync {
@@ -17,7 +22,13 @@ impl FileSystemSync {
         Self {
             db,
             notes_dir,
+            queue_manager: None,
         }
+    }
+    
+    pub fn with_queue_manager(mut self, queue_manager: Arc<QueueManager>) -> Self {
+        self.queue_manager = Some(queue_manager);
+        self
     }
     
     pub async fn sync_filesystem(&self) -> Result<SyncReport, Box<dyn std::error::Error>> {
@@ -91,6 +102,39 @@ impl FileSystemSync {
         if !existing_ids.contains(&transcription.id) {
             // New file - insert
             self.db.insert_transcription(&transcription).await?;
+            
+            // If it's orphaned (no transcription), enqueue for background processing
+            if transcription.status == "orphaned" {
+                if let Some(ref queue_manager) = self.queue_manager {
+                    let output_path = audio_path.with_extension("txt");
+                    let task = BackgroundTask {
+                        id: Uuid::new_v4().to_string(),
+                        transcription_id: transcription.id.clone(),
+                        task_type: TaskType::TranscribeOrphan {
+                            audio_path: audio_path.to_string_lossy().to_string(),
+                            output_path: output_path.to_string_lossy().to_string(),
+                        },
+                        priority: TaskPriority::Low,
+                        status: TaskStatus::Pending,
+                        created_at: Local::now(),
+                        started_at: None,
+                        completed_at: None,
+                        retry_count: 0,
+                        max_retries: 2,
+                        error_message: None,
+                        payload: json!({
+                            "audio_path": audio_path.to_string_lossy().to_string(),
+                        }),
+                    };
+                    
+                    if let Err(e) = queue_manager.enqueue_task(&self.db, task).await {
+                        log::error!("Failed to enqueue orphaned file {}: {}", transcription.id, e);
+                    } else {
+                        log::info!("Enqueued orphaned file {} for background transcription", transcription.id);
+                    }
+                }
+            }
+            
             Ok(ProcessResult::New)
         } else {
             // Check if needs update
@@ -144,7 +188,8 @@ impl FileSystemSync {
                 transcribed_at
             )
         } else {
-            (None, None, "pending".to_string(), None)
+            // File has no transcription - mark as orphaned and potentially queue for processing
+            (None, None, "orphaned".to_string(), None)
         };
         
         // Check for JSON metadata
@@ -185,37 +230,43 @@ impl FileSystemSync {
     }
     
     fn file_exists_for_id(&self, id: &str) -> bool {
-        // Check if any audio file exists with this ID
+        // ID format is YYYYMMDDHHMMSS, but filenames are just HHMMSS-voice-note.wav
+        // Extract the time portion from the ID
+        let time_part = if id.len() >= 14 {
+            &id[8..14] // Skip YYYYMMDD, get HHMMSS
+        } else if id.len() == 6 {
+            id // Already just time
+        } else {
+            return false; // Invalid ID format
+        };
+        
+        // Extract date parts for directory structure
+        let (year, month, day) = if id.len() >= 8 {
+            (&id[..4], &id[4..6], &id[6..8])
+        } else {
+            // Default to 2025-08-10 if no date in ID
+            ("2025", "08", "10")
+        };
+        
+        // Check in the date subdirectory
+        let date_dir = self.notes_dir
+            .join(year)
+            .join(format!("{}-{}-{}", year, month, day));
+        
+        // Check for files with just the time portion
         let patterns = vec![
-            format!("{}-voice-note.wav", id),
-            format!("{}.wav", id),
-            format!("{}-voice-note.mp3", id),
-            format!("{}.mp3", id),
+            format!("{}-voice-note.wav", time_part),
+            format!("{}-voice-note.mp3", time_part),
+            format!("{}-voice-note.m4a", time_part),
+            format!("{}.wav", time_part),
         ];
         
         for pattern in patterns {
-            let path = self.notes_dir.join(&pattern);
-            if path.exists() {
+            let date_path = date_dir.join(&pattern);
+            if date_path.exists() {
                 return true;
             }
-            
-            // Also check in date subdirectories
-            if id.len() >= 8 {
-                let year = &id[..4];
-                let month = &id[4..6];
-                let day = &id[6..8];
-                
-                let date_dir = self.notes_dir
-                    .join(year)
-                    .join(format!("{}-{}-{}", year, month, day));
-                
-                let date_path = date_dir.join(&pattern);
-                if date_path.exists() {
-                    return true;
-                }
-            }
         }
-        
         false
     }
 }
@@ -230,6 +281,7 @@ enum ProcessResult {
 #[tauri::command]
 pub async fn sync_filesystem_sqlx(
     db: tauri::State<'_, Arc<Database>>,
+    queue: tauri::State<'_, Arc<QueueManager>>,
     app: AppHandle,
 ) -> Result<SyncReport, String> {
     // For now, use the project's notes directory
@@ -238,8 +290,9 @@ pub async fn sync_filesystem_sqlx(
     
     println!("Starting SQLx filesystem sync from: {:?}", notes_dir);
     
-    // Create sync instance and run sync
-    let sync = FileSystemSync::new(db.inner().clone(), notes_dir);
+    // Create sync instance with queue manager and run sync
+    let sync = FileSystemSync::new(db.inner().clone(), notes_dir)
+        .with_queue_manager(queue.inner().clone());
     let report = sync.sync_filesystem().await
         .map_err(|e| {
             eprintln!("Sync failed: {}", e);

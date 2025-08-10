@@ -2,6 +2,7 @@ mod commands;
 mod database;
 mod api;
 mod sync;
+mod queue_manager;
 mod process_manager;
 mod port_manager;
 
@@ -10,6 +11,7 @@ use tokio::sync::Mutex as TokioMutex;
 use std::sync::Mutex as StdMutex;
 use voicetextrs::core::transcription::Transcriber;
 use voicetextrs::core::audio::AudioRecorder;
+use queue_manager::QueueManager;
 use commands::{AppState, RecordingState};
 use process_manager::ProcessManager;
 use port_manager::PortManager;
@@ -99,6 +101,15 @@ pub fn run() {
       api::transcriptions::clear_database,
       api::transcriptions::cleanup_duplicate_transcriptions,
       sync::sync_filesystem_sqlx,
+      // Queue management commands
+      api::queue::get_queue_status,
+      api::queue::get_queue_tasks,
+      api::queue::enqueue_orphan_task,
+      api::queue::pause_queue,
+      api::queue::resume_queue,
+      api::queue::retry_failed_task,
+      api::queue::clear_completed_tasks,
+      api::queue::is_queue_paused,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {
@@ -129,7 +140,23 @@ pub fn run() {
       })?;
       
       // Add database to managed state
-      app.manage(database);
+      app.manage(database.clone());
+      
+      // Initialize queue manager
+      let app_state_ref = app.state::<AppState>();
+      let mut queue_manager = QueueManager::new(app_state_ref.transcriber.clone());
+      queue_manager.set_app_handle(app.handle().clone());
+      let queue_manager = Arc::new(queue_manager);
+      
+      // Start the queue worker
+      let queue_clone = queue_manager.clone();
+      let db_clone = database.clone();
+      tauri::async_runtime::spawn(async move {
+        queue_clone.start_worker(db_clone).await;
+      });
+      
+      // Add queue manager to managed state
+      app.manage(queue_manager);
       
       // Set up system tray
       setup_system_tray(app)?;

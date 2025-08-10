@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { api } from './lib/api'
+import BackgroundTasksTab from './BackgroundTasksTab'
 import './App.css'
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useState(null) // Track sync status
   const [dbStats, setDbStats] = useState(null) // Database statistics
   const [showSettings, setShowSettings] = useState(false) // For dropdown visibility
+  const [activeTab, setActiveTab] = useState('transcriptions') // 'transcriptions' | 'background-tasks'
 
   useEffect(() => {
     console.log('App mounted, setting up event listeners...')
@@ -327,6 +329,26 @@ function App() {
           )}
         </div>
 
+        <div className="tabs-container">
+          <div className="tabs-header">
+            <button 
+              className={`tab-button ${activeTab === 'transcriptions' ? 'active' : ''}`}
+              onClick={() => setActiveTab('transcriptions')}
+            >
+              Transcriptions
+              {transcriptions.length > 0 && (
+                <span className="tab-badge">{transcriptions.length}</span>
+              )}
+            </button>
+            <button 
+              className={`tab-button ${activeTab === 'background-tasks' ? 'active' : ''}`}
+              onClick={() => setActiveTab('background-tasks')}
+            >
+              Background Tasks
+            </button>
+          </div>
+
+        {activeTab === 'transcriptions' && (
         <div className="transcriptions-section">
           <div className="section-header">
             <h2>Transcriptions</h2>
@@ -389,6 +411,12 @@ function App() {
               ))
             )}
           </div>
+        </div>
+        )}
+        
+        {activeTab === 'background-tasks' && (
+          <BackgroundTasksTab />
+        )}
         </div>
 
         <div className="shortcuts-info">

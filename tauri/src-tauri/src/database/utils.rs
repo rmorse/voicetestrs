@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Normalize a file path to a consistent relative format for database storage
 /// This ensures we don't get duplicates from different path representations

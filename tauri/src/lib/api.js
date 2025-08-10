@@ -55,21 +55,37 @@ export const api = {
     return invoke('db_update_transcription_status', { id, status, error });
   },
   
-  // Background tasks
-  async dbGetQueueStatus() {
-    return invoke('db_get_queue_status');
+  // Background tasks - Updated to match actual implementation
+  async getQueueStatus() {
+    return invoke('get_queue_status');
   },
   
-  async dbEnqueueTask(transcriptionId, taskType, priority = 1) {
-    return invoke('db_enqueue_task', { transcriptionId, taskType, priority });
+  async getQueueTasks(limit = 50, offset = 0) {
+    return invoke('get_queue_tasks', { limit, offset });
   },
   
-  async dbRetryTask(taskId) {
-    return invoke('db_retry_task', { taskId });
+  async enqueueOrphanTask(transcriptionId, audioPath) {
+    return invoke('enqueue_orphan_task', { transcriptionId, audioPath });
   },
   
-  async dbClearCompletedTasks() {
-    return invoke('db_clear_completed_tasks');
+  async pauseQueue() {
+    return invoke('pause_queue');
+  },
+  
+  async resumeQueue() {
+    return invoke('resume_queue');
+  },
+  
+  async retryFailedTask(taskId) {
+    return invoke('retry_failed_task', { taskId });
+  },
+  
+  async clearCompletedTasks() {
+    return invoke('clear_completed_tasks');
+  },
+  
+  async isQueuePaused() {
+    return invoke('is_queue_paused');
   },
   
   // Filesystem sync
