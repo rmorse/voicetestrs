@@ -122,7 +122,7 @@ function App() {
     const unlistenSyncComplete = listen('sync-complete', async (event) => {
       const report = event.payload
       console.log('Sync complete event received:', report)
-      setSyncStatus(`Sync complete: ${report.completed_transcriptions} transcriptions, ${report.orphaned_audio} orphaned files`)
+      setSyncStatus(`Sync complete: ${report.new_transcriptions || 0} new, ${report.updated_transcriptions || 0} updated, ${report.total_files_found || 0} total files`)
       
       // Wait a bit for all inserts to complete
       setTimeout(async () => {
@@ -224,17 +224,16 @@ function App() {
       setSyncStatus('Starting full resync...')
       console.log('Starting full resync - clearing database...')
       
-      // Clear all transcriptions from database
-      const db = await initDatabase()
-      await db.execute('DELETE FROM transcriptions')
+      // Clear all transcriptions from database using backend API
+      await api.clearDatabase()
       console.log('Database cleared')
       
       // Clear the UI
       setTranscriptions([])
       
-      // Trigger FORCED filesystem sync to repopulate (includes all files)
-      console.log('Triggering forced filesystem sync...')
-      const result = await invoke('sync_filesystem_force')
+      // Trigger filesystem sync to repopulate
+      console.log('Triggering filesystem sync...')
+      const result = await api.syncFilesystem()
       console.log('Resync completed:', result)
       
       // Reload transcriptions
