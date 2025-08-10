@@ -297,5 +297,6 @@ export default {
   enqueueTask,
   retryTask,
   clearCompletedTasks,
-  getDatabaseStats
+  getDatabaseStats,
+  cleanupDuplicates
 };

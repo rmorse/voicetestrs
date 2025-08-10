@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import db from './lib/database'
+import db, { initDatabase } from './lib/database'
 import './App.css'
 
 function App() {
@@ -11,6 +11,7 @@ function App() {
   const [error, setError] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null) // Track sync status
   const [dbStats, setDbStats] = useState(null) // Database statistics
+  const [showSettings, setShowSettings] = useState(false) // For dropdown visibility
 
   useEffect(() => {
     console.log('App mounted, setting up event listeners...')
@@ -101,7 +102,9 @@ function App() {
       try {
         await db.insertTranscription(transcription)
         // Reload transcriptions to show the new one
-        loadTranscriptions()
+        await loadTranscriptions()
+        // Also reload database stats to update counts
+        await loadDbStats()
       } catch (err) {
         console.error('Failed to insert transcription:', err)
       }
@@ -193,6 +196,14 @@ function App() {
     }
     return () => clearInterval(interval)
   }, [appState])
+  
+  // Update database stats whenever transcriptions list changes
+  useEffect(() => {
+    if (transcriptions.length > 0 || (dbStats && dbStats.total_transcriptions > 0)) {
+      // Reload stats when transcriptions change
+      loadDbStats()
+    }
+  }, [transcriptions])
 
   const toggleRecording = async () => {
     try {
@@ -223,6 +234,37 @@ function App() {
 
   const clearTranscriptions = () => {
     setTranscriptions([])
+  }
+  
+  const fullResync = async () => {
+    try {
+      setSyncStatus('Starting full resync...')
+      console.log('Starting full resync - clearing database...')
+      
+      // Clear all transcriptions from database
+      const db = await initDatabase()
+      await db.execute('DELETE FROM transcriptions')
+      console.log('Database cleared')
+      
+      // Clear the UI
+      setTranscriptions([])
+      
+      // Trigger filesystem sync to repopulate
+      console.log('Triggering filesystem sync...')
+      const result = await invoke('sync_filesystem')
+      console.log('Resync completed:', result)
+      
+      // Reload transcriptions
+      await loadTranscriptions()
+      await loadDbStats()
+      
+      setSyncStatus('Full resync completed!')
+      setTimeout(() => setSyncStatus(null), 3000)
+    } catch (err) {
+      console.error('Full resync failed:', err)
+      setSyncStatus(`Resync failed: ${err}`)
+      setTimeout(() => setSyncStatus(null), 5000)
+    }
   }
 
   const formatDuration = (seconds) => {
@@ -295,6 +337,28 @@ function App() {
                   {dbStats.total_transcriptions} total, {dbStats.completed} completed
                 </span>
               )}
+              <div className="settings-dropdown">
+                <button 
+                  className="settings-button"
+                  onClick={() => setShowSettings(!showSettings)}
+                  title="Settings"
+                >
+                  ⚙️
+                </button>
+                {showSettings && (
+                  <div className="dropdown-menu">
+                    <button 
+                      className="dropdown-item"
+                      onClick={async () => {
+                        setShowSettings(false)
+                        await fullResync()
+                      }}
+                    >
+                      🔄 Full Resync
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
