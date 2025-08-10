@@ -575,6 +575,7 @@ const fullResync = async () => {
 - Already used by Tauri
 - Migration system built-in
 - Type-safe query macros
+- Tauri already uses sqlq under the hood, meaning our existing frontend DB code syntax should be easier to migrate.
 
 ### Database Location
 - Development: `./voicetextrs.db`
