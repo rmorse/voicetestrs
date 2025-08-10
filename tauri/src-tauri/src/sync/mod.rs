@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
 use tauri::{AppHandle, Manager, Emitter};
 
-use crate::database::{Database, models::{Transcription, SyncReport}};
+use crate::database::{Database, models::{Transcription, SyncReport}, utils};
 
 pub struct FileSystemSync {
     db: Arc<Database>,
@@ -109,18 +109,12 @@ impl FileSystemSync {
     }
     
     fn create_transcription_from_file(&self, audio_path: &Path) -> Result<Transcription, Box<dyn std::error::Error>> {
-        // Extract ID from filename (format: YYYYMMDD-HHMMSS-voice-note.wav)
-        let file_name = audio_path.file_stem()
+        // Extract ID from filename using utility function
+        let file_name = audio_path.file_name()
             .and_then(|s| s.to_str())
             .ok_or("Invalid file name")?;
         
-        // Extract date-time part (first 15 characters)
-        let id = if file_name.len() >= 15 {
-            file_name[..15].replace("-", "")
-        } else {
-            // Fallback: use full filename
-            file_name.to_string()
-        };
+        let id = utils::generate_id_from_filename(file_name);
         
         // Get file metadata
         let metadata = std::fs::metadata(audio_path)?;
@@ -166,8 +160,8 @@ impl FileSystemSync {
         
         Ok(Transcription {
             id,
-            audio_path: audio_path.to_string_lossy().to_string(),
-            text_path: text_path_opt,
+            audio_path: utils::normalize_audio_path(audio_path),
+            text_path: text_path_opt.map(|p| utils::normalize_audio_path(Path::new(&p))),
             transcription_text,
             created_at,
             transcribed_at,

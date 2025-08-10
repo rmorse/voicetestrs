@@ -103,6 +103,7 @@ pub fn run() {
       api::transcriptions::search_transcriptions,
       api::transcriptions::get_database_stats,
       api::transcriptions::clear_database,
+      api::transcriptions::cleanup_duplicate_transcriptions,
       sync::sync_filesystem_sqlx,
     ])
     .setup(move |app| {

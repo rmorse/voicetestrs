@@ -40,6 +40,8 @@ function App() {
     // Run the sync
     runStartupSync()
     
+    // Duplicates issue has been fixed - consistent ID generation now in place
+    
     // Check initial state on mount
     invoke('get_recording_status').then(state => {
       setAppState(state)

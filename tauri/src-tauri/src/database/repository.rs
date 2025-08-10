@@ -210,4 +210,47 @@ impl Database {
             .await?;
         Ok(())
     }
+    
+    // Clean up duplicate entries, keeping only the ones with clean paths
+    pub async fn cleanup_duplicates(&self) -> Result<usize, sqlx::Error> {
+        // First, get all transcriptions
+        let all_transcriptions = query_as::<_, Transcription>(
+            "SELECT * FROM transcriptions ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        
+        let mut seen_paths = std::collections::HashSet::new();
+        let mut to_delete = Vec::new();
+        
+        for t in all_transcriptions {
+            // Normalize the path for comparison
+            let normalized = crate::database::utils::normalize_audio_path(
+                std::path::Path::new(&t.audio_path)
+            );
+            
+            // If we've seen this normalized path before, mark for deletion
+            if seen_paths.contains(&normalized) {
+                to_delete.push(t.id);
+            } else {
+                seen_paths.insert(normalized);
+                // If this entry has a non-normalized path, also mark it
+                if t.audio_path.contains(":\\") || t.audio_path.starts_with("\\\\") {
+                    to_delete.push(t.id);
+                }
+            }
+        }
+        
+        // Delete duplicates
+        let mut deleted_count = 0;
+        for id in to_delete {
+            query("DELETE FROM transcriptions WHERE id = ?1")
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+            deleted_count += 1;
+        }
+        
+        Ok(deleted_count)
+    }
 }

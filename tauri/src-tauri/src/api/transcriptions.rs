@@ -76,3 +76,12 @@ pub async fn clear_database(
         .await
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn cleanup_duplicate_transcriptions(
+    db: State<'_, Arc<Database>>,
+) -> Result<usize, String> {
+    db.cleanup_duplicates()
+        .await
+        .map_err(|e| e.to_string())
+}

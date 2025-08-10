@@ -34,6 +34,10 @@ export const api = {
     return invoke('clear_database');
   },
   
+  async cleanupDuplicates() {
+    return invoke('cleanup_duplicate_transcriptions');
+  },
+  
   // Legacy database commands (will be phased out)
   async dbGetTranscriptions(limit = 50, offset = 0, statusFilter = null) {
     return invoke('db_get_transcriptions', { limit, offset, statusFilter });

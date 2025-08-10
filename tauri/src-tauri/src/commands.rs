@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::{AppHandle, State, Emitter, Manager};
 use serde::{Deserialize, Serialize};
-use crate::database::{Database, models::Transcription};
+use crate::database::{Database, models::Transcription, utils};
 
 // Import our existing modules from the main project
 use voicetextrs::core::audio::AudioRecorder;
@@ -133,16 +133,12 @@ pub async fn stop_recording(
     // Insert transcription into database
     let db = app.state::<Arc<Database>>();
     
-    // Extract ID from filename
-    let file_name = audio_path.file_stem()
+    // Generate consistent ID from filename
+    let file_name = audio_path.file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown");
     
-    let id = if file_name.len() >= 15 {
-        file_name[..15].replace("-", "")
-    } else {
-        file_name.to_string()
-    };
+    let id = utils::generate_id_from_filename(file_name);
     
     // Get file metadata
     let file_size_bytes = std::fs::metadata(&audio_path)
@@ -151,8 +147,8 @@ pub async fn stop_recording(
     
     let db_transcription = Transcription {
         id,
-        audio_path: audio_path.to_string_lossy().to_string(),
-        text_path: Some(text_path.to_string_lossy().to_string()),
+        audio_path: utils::normalize_audio_path(&audio_path),
+        text_path: Some(utils::normalize_audio_path(&text_path)),
         transcription_text: Some(transcription.text.clone()),
         created_at: timestamp.with_timezone(&chrono::Utc),
         transcribed_at: Some(chrono::Utc::now()),
