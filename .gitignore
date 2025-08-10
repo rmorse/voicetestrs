@@ -22,8 +22,9 @@ Cargo.lock
 /config.toml.local
 *.log
 
-# Whisper models (large files)
-whisper/
+# Whisper binaries and models (large files)
+whisper/models/
+whisper/Release/
 *.pt
 *.onnx
 
