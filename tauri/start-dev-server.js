@@ -15,7 +15,10 @@ async function findAvailablePort(startPort = 5173) {
   for (let port = startPort; port < startPort + 100; port++) {
     const isAvailable = await checkPortAvailable(port);
     if (isAvailable) {
+      console.log(`Port ${port} is available`);
       return port;
+    } else {
+      console.log(`Port ${port} is in use, trying next...`);
     }
   }
   throw new Error('No available ports found');
@@ -24,11 +27,20 @@ async function findAvailablePort(startPort = 5173) {
 function checkPortAvailable(port) {
   return new Promise((resolve) => {
     const server = net.createServer();
-    server.once('error', () => resolve(false));
-    server.once('listening', () => {
-      server.close();
-      resolve(true);
+    
+    server.once('error', (err) => {
+      resolve(false);
     });
+    
+    server.once('listening', () => {
+      server.close(() => {
+        // Add a small delay after closing to ensure port is fully released
+        setTimeout(() => resolve(true), 100);
+      });
+    });
+    
+    // Listen on all interfaces to properly detect port usage
+    // server.listen(port, '0.0.0.0');
     server.listen(port);
   });
 }
@@ -84,12 +96,22 @@ async function main() {
   const cleanup = (exitCode = 0) => {
     console.log('\nShutting down dev server...');
     
-    // Clean up port file
+    // Clean up port files
     const portFile = path.join(__dirname, '.current-port');
     if (fs.existsSync(portFile)) {
       try {
         fs.unlinkSync(portFile);
         console.log('Cleaned up port file');
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+    
+    const parentPortFile = path.join(__dirname, '..', '.current-port');
+    if (fs.existsSync(parentPortFile)) {
+      try {
+        fs.unlinkSync(parentPortFile);
+        console.log('Cleaned up parent port file');
       } catch (e) {
         // Ignore errors
       }
@@ -176,7 +198,7 @@ async function main() {
   }
   
   try {
-    // Clean up any stale port file from previous runs
+    // Clean up any stale port files from previous runs
     const portFile = path.join(__dirname, '.current-port');
     if (fs.existsSync(portFile)) {
       try {
@@ -186,12 +208,24 @@ async function main() {
       }
     }
     
+    const parentPortFile = path.join(__dirname, '..', '.current-port');
+    if (fs.existsSync(parentPortFile)) {
+      try {
+        fs.unlinkSync(parentPortFile);
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+    
     // Find an available port
     const port = await findAvailablePort();
     console.log(`Found available port: ${port}`);
     
-    // Write port to temp file for Tauri to read
+    // Write port to temp file for Tauri to read  
+    // Also write to parent directory where Rust expects it
     fs.writeFileSync(portFile, port.toString());
+    const rustPortFile = path.join(__dirname, '..', '.current-port');
+    fs.writeFileSync(rustPortFile, port.toString());
     
     // Start Vite with the selected port
     console.log(`Starting Vite dev server on port ${port}...`);
