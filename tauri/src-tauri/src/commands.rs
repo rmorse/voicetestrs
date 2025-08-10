@@ -37,7 +37,9 @@ pub async fn start_recording(
     // Check current state - must be Idle to start recording
     let current_state = *state.state.lock().await;
     if current_state != RecordingState::Idle {
-        return Err(format!("Cannot start recording in {:?} state", current_state));
+        // If already recording or processing, just ignore the request
+        println!("Warning: start_recording called in {:?} state, ignoring", current_state);
+        return Ok(());
     }
     
     // Use the pre-initialized recorder
@@ -70,7 +72,13 @@ pub async fn stop_recording(
     // Check current state - must be Recording to stop
     let current_state = *state.state.lock().await;
     if current_state != RecordingState::Recording {
-        return Err(format!("Cannot stop recording in {:?} state", current_state));
+        // If already idle or processing, just return a dummy result instead of error
+        println!("Warning: stop_recording called in {:?} state, ignoring", current_state);
+        return Ok(TranscriptionResult {
+            text: String::new(),
+            audio_path: String::new(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        });
     }
     
     // Set state to Processing immediately
@@ -163,9 +171,16 @@ pub async fn stop_recording(
         session_id: None,
     };
     
-    if let Err(e) = db.insert_transcription(&db_transcription).await {
-        eprintln!("Failed to insert transcription into database: {}", e);
-        // Don't fail the whole operation if DB insert fails
+    match db.insert_transcription(&db_transcription).await {
+        Ok(_) => {
+            println!("Successfully inserted transcription with ID: {}", db_transcription.id);
+        }
+        Err(e) => {
+            eprintln!("Failed to insert transcription into database: {}", e);
+            eprintln!("Transcription ID was: {}", db_transcription.id);
+            eprintln!("Audio path: {}", db_transcription.audio_path);
+            // Don't fail the whole operation if DB insert fails
+        }
     }
     
     // Set state back to Idle after successful transcription
@@ -192,7 +207,13 @@ pub async fn quick_note(
     // Check current state - must be Idle to start
     let current_state = *state.state.lock().await;
     if current_state != RecordingState::Idle {
-        return Err(format!("Cannot start quick note in {:?} state", current_state));
+        // If already recording or processing, just ignore the request
+        println!("Warning: quick_note called in {:?} state, ignoring", current_state);
+        return Ok(TranscriptionResult {
+            text: String::new(),
+            audio_path: String::new(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        });
     }
     
     // Start recording using the pre-initialized recorder

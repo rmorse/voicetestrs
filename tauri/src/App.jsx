@@ -21,11 +21,17 @@ function App() {
       console.log('Running filesystem sync on startup...')
       setSyncStatus('Syncing filesystem...')
       
+      // Add timeout to prevent infinite hang
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Sync timeout after 10s')), 10000)
+      )
+      
       // Backend handles all database operations now
       
       try {
-        // Use new SQLx-based sync
-        const result = await api.syncFilesystem()
+        // Use new SQLx-based sync with timeout
+        const syncPromise = api.syncFilesystem()
+        const result = await Promise.race([syncPromise, timeoutPromise])
         console.log('Sync completed:', result)
         // After sync, load transcriptions from database
         await loadTranscriptions()
@@ -34,18 +40,28 @@ function App() {
         setSyncStatus(`Sync failed: ${err}`)
         // Even if sync fails, try to load existing transcriptions
         await loadTranscriptions()
+      } finally {
+        // Clear sync status after a moment
+        setTimeout(() => setSyncStatus(null), 3000)
       }
     }
     
-    // Run the sync
-    runStartupSync()
+    // Initialize app state first
+    const initializeApp = async () => {
+      try {
+        // Get initial recording state FIRST
+        const initialState = await invoke('get_recording_status')
+        console.log('Initial recording state:', initialState)
+        setAppState(initialState)
+      } catch (err) {
+        console.error('Failed to get initial state:', err)
+      }
+      
+      // Then run the sync
+      runStartupSync()
+    }
     
-    // Duplicates issue has been fixed - consistent ID generation now in place
-    
-    // Check initial state on mount
-    invoke('get_recording_status').then(state => {
-      setAppState(state)
-    }).catch(console.error)
+    initializeApp()
 
     // Listen for transcription events from backend
     const unlisten = listen('transcription-complete', async (event) => {
@@ -192,10 +208,10 @@ function App() {
     try {
       setError(null)
       if (appState === 'recording') {
-        // Stop recording - state will change to 'processing' then 'idle'
+        // Stop recording - backend will ignore if not actually recording
         await invoke('stop_recording')
       } else if (appState === 'idle') {
-        // Start recording - state will change to 'recording'
+        // Start recording - backend will ignore if not actually idle
         await invoke('start_recording')
       }
       // If processing, do nothing (button should be disabled)
@@ -208,6 +224,7 @@ function App() {
     try {
       setError(null)
       if (appState === 'idle') {
+        // Backend will ignore if not actually idle
         await invoke('quick_note', { duration: 10 })
       }
     } catch (err) {

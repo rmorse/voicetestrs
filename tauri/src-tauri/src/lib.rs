@@ -58,8 +58,39 @@ pub fn run() {
       }
     });
     
-    // Give Vite more time to start
-    std::thread::sleep(std::time::Duration::from_secs(5));
+    // Wait for Vite to be ready by polling the server
+    println!("Waiting for Vite dev server to be ready...");
+    let start_time = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(60); // Increase timeout to 60 seconds
+    
+    loop {
+      // Check if we've exceeded the timeout
+      if start_time.elapsed() > timeout {
+        eprintln!("WARNING: Vite server didn't respond after 60 seconds, proceeding anyway");
+        break;
+      }
+      
+      // Try to connect to the Vite server
+      match std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
+        Ok(_) => {
+          println!("Vite dev server is ready on port {} (took {:.2}s)", 
+                   port, start_time.elapsed().as_secs_f64());
+          // Give it a tiny bit more time to fully initialize
+          std::thread::sleep(std::time::Duration::from_millis(500));
+          break;
+        }
+        Err(_) => {
+          // Server not ready yet, wait a bit before retrying
+          std::thread::sleep(std::time::Duration::from_millis(500));
+          
+          // Print progress every 5 seconds
+          let elapsed = start_time.elapsed().as_secs();
+          if elapsed > 0 && elapsed % 5 == 0 {
+            println!("Still waiting for Vite... ({}s elapsed)", elapsed);
+          }
+        }
+      }
+    }
   }
   
   // Initialize the app state with pre-initialized recorder
