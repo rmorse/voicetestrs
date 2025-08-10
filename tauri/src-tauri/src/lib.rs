@@ -1,5 +1,8 @@
 mod commands;
 mod db_commands;
+mod database;
+mod api;
+mod sync;
 
 use std::sync::Arc;
 use std::process::Command;
@@ -18,6 +21,14 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // Initialize database
+  let database_fut = async {
+    database::Database::new("sqlite:voicetextrs.db").await
+  };
+  
+  let database = tauri::async_runtime::block_on(database_fut)
+    .expect("Failed to initialize database");
+  
   // Find an unused port
   let port = portpicker::pick_unused_port().expect("failed to find unused port");
   println!("Using port: {}", port);
@@ -107,6 +118,7 @@ pub fn run() {
         .build(),
     )
     .manage(app_state)
+    .manage(database)
     .invoke_handler(tauri::generate_handler![
       commands::start_recording,
       commands::stop_recording,
@@ -123,6 +135,15 @@ pub fn run() {
       db_commands::db_clear_completed_tasks,
       db_commands::sync_filesystem,
       db_commands::sync_filesystem_force,
+      // New SQLx-based API commands
+      api::transcriptions::get_transcriptions,
+      api::transcriptions::get_transcription,
+      api::transcriptions::update_transcription,
+      api::transcriptions::delete_transcription,
+      api::transcriptions::search_transcriptions,
+      api::transcriptions::get_database_stats,
+      api::transcriptions::clear_database,
+      sync::sync_filesystem_sqlx,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {

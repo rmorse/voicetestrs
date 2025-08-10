@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import db, { initDatabase } from './lib/database'
+import { api } from './lib/api'
 import './App.css'
 
 function App() {
@@ -163,15 +164,30 @@ function App() {
   const loadTranscriptions = async () => {
     try {
       console.log('Loading transcriptions from database...')
-      // Don't filter by status to see all transcriptions, ensure DESC order
-      const data = await db.getTranscriptions({ 
-        status: null, 
-        limit: 50, 
-        offset: 0,
-        orderBy: 'datetime(created_at) DESC'  // Ensure proper datetime ordering
-      })
-      console.log('Loaded transcriptions ordered by date:', data)
-      setTranscriptions(data)
+      
+      // MIGRATION: Comment out old code and use new API
+      const USE_NEW_API = false // Toggle this to switch between old/new implementation
+      
+      if (USE_NEW_API) {
+        // New SQLx-based API
+        const data = await api.getTranscriptions({ 
+          limit: 50, 
+          offset: 0,
+          status: null
+        })
+        console.log('Loaded transcriptions from new API:', data)
+        setTranscriptions(data)
+      } else {
+        // Old frontend database
+        const data = await db.getTranscriptions({ 
+          status: null, 
+          limit: 50, 
+          offset: 0,
+          orderBy: 'datetime(created_at) DESC'  // Ensure proper datetime ordering
+        })
+        console.log('Loaded transcriptions ordered by date:', data)
+        setTranscriptions(data)
+      }
     } catch (err) {
       console.error('Failed to load transcriptions:', err)
     }
