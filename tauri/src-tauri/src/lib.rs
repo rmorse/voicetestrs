@@ -356,116 +356,38 @@ async fn toggle_recording(app: &AppHandle) {
 }
 
 pub async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let state = app.state::<AppState>();
+    // Simply call the existing start_recording command which handles everything
+    use tauri::State;
     
-    // Check current state - must be Idle
-    let current_state = *state.state.lock().await;
-    if current_state != RecordingState::Idle {
-        println!("Cannot start recording in {:?} state", current_state);
-        return Ok(());
-    }
+    let state: State<AppState> = app.state();
+    commands::start_recording(app.clone(), state).await
+        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error>)?;
     
-    // Use the pre-initialized recorder
-    let mut recorder_lock = state.recorder.lock().await;
-    if let Some(recorder) = recorder_lock.as_mut() {
-        recorder.start_recording()?;
-        *state.state.lock().await = RecordingState::Recording;
-    } else {
-        return Err("Recorder not initialized".into());
-    }
-    
-    // TODO: Update tray menu text when Tauri supports it
-    
-    // Emit state change event
-    app.emit("state-changed", serde_json::json!({
-        "state": "recording"
-    }))?;
-    
-    println!("Recording started from tray");
+    println!("Recording started from tray/hotkey");
     Ok(())
 }
 
 pub async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let state = app.state::<AppState>();
+    // Simply call the existing stop_recording command which handles everything
+    use tauri::State;
     
-    // Check current state - must be Recording
-    let current_state = *state.state.lock().await;
-    if current_state != RecordingState::Recording {
-        println!("Cannot stop recording in {:?} state", current_state);
-        return Ok(());
-    }
+    let state: State<AppState> = app.state();
+    let _result = commands::stop_recording(app.clone(), state).await
+        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error>)?;
     
-    // Set state to Processing immediately
-    *state.state.lock().await = RecordingState::Processing;
-    
-    // Emit state change to show processing UI
-    app.emit("state-changed", serde_json::json!({
-        "state": "processing"
-    }))?;
-    
-    // Stop recording but keep the recorder alive (don't take it)
-    let path = {
-        let mut recorder_lock = state.recorder.lock().await;
-        if let Some(recorder) = recorder_lock.as_mut() {
-            recorder.stop_recording()?
-        } else {
-            return Err("No active recording".into());
-        }
-    };
-    
-    // TODO: Update tray menu text when Tauri supports it
-    
-    // Transcribe
-    let result = state.transcriber.transcribe(&path).await?;
-    
-    // Save transcription
-    let text_path = path.with_extension("txt");
-    std::fs::write(&text_path, &result.text)?;
-    
-    // Save metadata
-    let meta_path = path.with_extension("json");
-    let metadata = serde_json::json!({
-        "audio_file": path.to_string_lossy(),
-        "text_file": text_path.to_string_lossy(),
-        "language": result.language,
-        "duration": result.duration,
-        "timestamp": chrono::Local::now().to_rfc3339(),
-    });
-    std::fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
-    
-    // Set state back to Idle
-    *state.state.lock().await = RecordingState::Idle;
-    
-    // Emit state change back to idle
-    app.emit("state-changed", serde_json::json!({
-        "state": "idle"
-    }))?;
-    
-    // Emit transcription complete event
-    app.emit("transcription-complete", serde_json::json!({
-        "text": result.text,
-        "audio_path": path.to_string_lossy(),
-        "text_path": text_path.to_string_lossy(),
-    }))?;
-    
-    println!("Recording stopped and transcribed from tray");
+    println!("Recording stopped and transcribed from tray/hotkey");
     Ok(())
 }
 
 async fn quick_note_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    // Start recording
-    start_recording_from_tray(app).await?;
+    // Simply call the existing quick_note command which handles everything
+    use tauri::State;
     
-    // Schedule stop after 10 seconds
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        if let Err(e) = stop_recording_from_tray(&app_handle).await {
-            eprintln!("Failed to stop quick note recording: {}", e);
-        }
-    });
+    let state: State<AppState> = app.state();
+    commands::quick_note(app.clone(), state, 10).await
+        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn std::error::Error>)?;
     
-    println!("Quick note started - will stop in 10 seconds");
+    println!("Quick note completed from tray");
     Ok(())
 }
 
