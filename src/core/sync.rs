@@ -3,6 +3,7 @@ use chrono::{DateTime, Local, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
 use crate::core::database::{Transcription, TranscriptionStatus, TranscriptionSource};
@@ -104,17 +105,13 @@ impl FileSystemSync {
         let mut transcription = Transcription::new_orphan(relative_path.clone());
         transcription.id = id;
         
+        // Get file size
         if let Ok(metadata) = fs::metadata(audio_path) {
             transcription.file_size_bytes = metadata.len() as i64;
-            
-            if let Ok(created) = metadata.created() {
-                if let Ok(duration) = created.duration_since(std::time::UNIX_EPOCH) {
-                    let naive = NaiveDateTime::from_timestamp_opt(duration.as_secs() as i64, 0)
-                        .unwrap_or_else(|| NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
-                    transcription.created_at = DateTime::from_naive_utc_and_offset(naive, *Local::now().offset());
-                }
-            }
         }
+        
+        // Use our robust timestamp extraction
+        transcription.created_at = Self::extract_file_timestamp(audio_path);
         
         if json_path.exists() {
             if let Ok(json_content) = fs::read_to_string(&json_path) {
@@ -167,6 +164,87 @@ impl FileSystemSync {
         
         format!("{}-{}", date_part, time_part)
     }
+    
+    /// Extract the best available timestamp from a file
+    /// Priority: 1) Modified time, 2) Created time, 3) Current time
+    /// This is reusable for import functionality later
+    pub fn extract_file_timestamp(path: &Path) -> DateTime<Local> {
+        if let Ok(metadata) = fs::metadata(path) {
+            // First try modified time (most reliable when files are moved)
+            if let Ok(modified) = metadata.modified() {
+                if let Some(datetime) = Self::system_time_to_datetime(modified) {
+                    return datetime;
+                }
+            }
+            
+            // Fall back to created time if modified is not available
+            if let Ok(created) = metadata.created() {
+                if let Some(datetime) = Self::system_time_to_datetime(created) {
+                    return datetime;
+                }
+            }
+        }
+        
+        // Last resort: try to parse from filename if it contains a timestamp
+        if let Some(datetime) = Self::parse_timestamp_from_filename(path) {
+            return datetime;
+        }
+        
+        // Ultimate fallback: current time
+        Local::now()
+    }
+    
+    /// Convert SystemTime to DateTime<Local>
+    fn system_time_to_datetime(sys_time: SystemTime) -> Option<DateTime<Local>> {
+        if let Ok(duration) = sys_time.duration_since(std::time::UNIX_EPOCH) {
+            let timestamp = duration.as_secs() as i64;
+            if let Some(naive) = NaiveDateTime::from_timestamp_opt(timestamp, 0) {
+                return Some(DateTime::from_naive_utc_and_offset(naive, *Local::now().offset()));
+            }
+        }
+        None
+    }
+    
+    /// Try to parse timestamp from filename (e.g., "2025-08-10/141201-voice-note.wav")
+    fn parse_timestamp_from_filename(path: &Path) -> Option<DateTime<Local>> {
+        // Get the parent directory name (should be date like 2025-08-10)
+        let date_str = path.parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())?;
+        
+        // Get the filename time part (HHMMSS from "141201-voice-note.wav")
+        let time_str = path.file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.split('-').next())?;
+        
+        // Parse date components
+        let date_parts: Vec<&str> = date_str.split('-').collect();
+        if date_parts.len() != 3 {
+            return None;
+        }
+        
+        let year: i32 = date_parts[0].parse().ok()?;
+        let month: u32 = date_parts[1].parse().ok()?;
+        let day: u32 = date_parts[2].parse().ok()?;
+        
+        // Parse time components (HHMMSS)
+        if time_str.len() != 6 {
+            return None;
+        }
+        
+        let hour: u32 = time_str[0..2].parse().ok()?;
+        let minute: u32 = time_str[2..4].parse().ok()?;
+        let second: u32 = time_str[4..6].parse().ok()?;
+        
+        // Create NaiveDateTime and convert to Local
+        let naive = NaiveDateTime::parse_from_str(
+            &format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", 
+                     year, month, day, hour, minute, second),
+            "%Y-%m-%d %H:%M:%S"
+        ).ok()?;
+        
+        Some(DateTime::from_naive_utc_and_offset(naive, *Local::now().offset()))
+    }
 
     pub fn get_transcription_for_insert(&self, audio_path: &Path) -> Result<Transcription> {
         let relative_path = audio_path
@@ -183,17 +261,13 @@ impl FileSystemSync {
         let mut transcription = Transcription::new_orphan(relative_path.clone());
         transcription.id = id;
         
+        // Get file size
         if let Ok(metadata) = fs::metadata(audio_path) {
             transcription.file_size_bytes = metadata.len() as i64;
-            
-            if let Ok(created) = metadata.created() {
-                if let Ok(duration) = created.duration_since(std::time::UNIX_EPOCH) {
-                    let naive = NaiveDateTime::from_timestamp_opt(duration.as_secs() as i64, 0)
-                        .unwrap_or_else(|| NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
-                    transcription.created_at = DateTime::from_naive_utc_and_offset(naive, *Local::now().offset());
-                }
-            }
         }
+        
+        // Use our robust timestamp extraction
+        transcription.created_at = Self::extract_file_timestamp(audio_path);
         
         if json_path.exists() {
             if let Ok(json_content) = fs::read_to_string(&json_path) {

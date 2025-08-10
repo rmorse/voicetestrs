@@ -19,6 +19,16 @@ function App() {
     const runStartupSync = async () => {
       console.log('Running filesystem sync on startup...')
       setSyncStatus('Syncing filesystem...')
+      
+      // Clean up any duplicate entries first
+      console.log('Cleaning up duplicate entries...')
+      try {
+        await db.cleanupDuplicates()
+        console.log('Cleanup completed')
+      } catch (err) {
+        console.error('Failed to cleanup duplicates:', err)
+      }
+      
       try {
         const result = await invoke('sync_filesystem')
         console.log('Sync completed:', result)
@@ -42,13 +52,44 @@ function App() {
 
     // Listen for transcription events from backend
     const unlisten = listen('transcription-complete', async (event) => {
+      console.log('Transcription complete event:', event.payload)
+      
+      // Extract relative path from absolute path if needed
+      let audioPath = event.payload.audio_path || event.payload.audioPath
+      let textPath = event.payload.text_path || event.payload.textPath
+      
+      // Remove Windows path prefix and convert to relative path
+      if (audioPath && audioPath.includes('\\?\\')) {
+        // Extract just the relative path from notes folder
+        const match = audioPath.match(/notes[\\/](.+)/)
+        if (match) {
+          audioPath = match[1].replace(/\\/g, '/')
+        }
+      }
+      
+      if (textPath && textPath.includes('\\?\\')) {
+        const match = textPath.match(/notes[\\/](.+)/)
+        if (match) {
+          textPath = match[1].replace(/\\/g, '/')
+        }
+      }
+      
+      // Use the timestamp from backend (extracted using our robust method)
+      const createdAt = event.payload.created_at || new Date().toISOString()
+      
+      // Generate ID from the timestamp
+      const date = new Date(createdAt)
+      const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
+      const timeStr = date.toTimeString().slice(0, 8).replace(/:/g, '')
+      const id = `${dateStr}-${timeStr}`
+      
       // Insert new transcription into database
       const transcription = {
-        id: `${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`,
-        audio_path: event.payload.audioPath,
-        text_path: event.payload.textPath,
+        id: id,
+        audio_path: audioPath,
+        text_path: textPath,
         transcription_text: event.payload.text,
-        created_at: new Date().toISOString(),
+        created_at: createdAt,  // Use the timestamp from backend (file metadata)
         status: 'complete',
         source: 'recording',
         duration_seconds: 0,
@@ -80,21 +121,11 @@ function App() {
       const transcription = event.payload
       console.log('Received sync-transcription event:', transcription)
       try {
-        // Check if transcription already exists
-        const existing = await db.getTranscription(transcription.id)
-        console.log('Existing transcription check:', existing)
-        if (!existing) {
-          console.log('Inserting new transcription:', transcription)
-          try {
-            const insertResult = await db.insertTranscription(transcription)
-            console.log('Insert result:', insertResult)
-            console.log('Successfully synced transcription:', transcription.id)
-          } catch (insertErr) {
-            console.error('Failed to insert transcription:', insertErr)
-          }
-        } else {
-          console.log('Transcription already exists:', transcription.id)
-        }
+        // Use upsert (insert or update) for syncing
+        console.log('Upserting transcription:', transcription.id)
+        const insertResult = await db.insertTranscription(transcription)
+        console.log('Upsert result:', insertResult)
+        console.log('Successfully synced transcription:', transcription.id)
       } catch (err) {
         console.error('Failed to sync transcription:', err)
       }
@@ -130,9 +161,14 @@ function App() {
   const loadTranscriptions = async () => {
     try {
       console.log('Loading transcriptions from database...')
-      // Don't filter by status to see all transcriptions
-      const data = await db.getTranscriptions({ status: null, limit: 50, offset: 0 })
-      console.log('Loaded transcriptions:', data)
+      // Don't filter by status to see all transcriptions, ensure DESC order
+      const data = await db.getTranscriptions({ 
+        status: null, 
+        limit: 50, 
+        offset: 0,
+        orderBy: 'datetime(created_at) DESC'  // Ensure proper datetime ordering
+      })
+      console.log('Loaded transcriptions ordered by date:', data)
       setTranscriptions(data)
     } catch (err) {
       console.error('Failed to load transcriptions:', err)

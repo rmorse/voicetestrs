@@ -148,8 +148,6 @@ pub fn run() {
         if let Err(e) = app_handle.emit("start-filesystem-sync", ()) {
           eprintln!("Failed to emit sync event: {}", e);
         }
-        // Log the sync start
-        println!("Starting filesystem sync on startup");    
       });
       
       // Check for --background flag

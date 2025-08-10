@@ -19,6 +19,7 @@ pub enum RecordingState {
 pub struct TranscriptionResult {
     pub text: String,
     pub audio_path: String,
+    pub created_at: String,  // ISO timestamp of when the recording was created
 }
 
 pub struct AppState {
@@ -110,9 +111,14 @@ pub async fn stop_recording(
         }
     };
     
+    // Use the robust timestamp extraction from our sync module
+    use voicetextrs::core::sync::FileSystemSync;
+    let timestamp = FileSystemSync::extract_file_timestamp(&audio_path);
+    
     let result = TranscriptionResult {
         text: transcription.text.clone(),
         audio_path: audio_path.to_string_lossy().to_string(),
+        created_at: timestamp.to_rfc3339(),  // Convert to ISO string
     };
     
     // Set state back to Idle after successful transcription
@@ -180,9 +186,14 @@ pub async fn transcribe_file(
         .await
         .map_err(|e| format!("Transcription failed: {}", e))?;
     
+    // Use the robust timestamp extraction from our sync module
+    use voicetextrs::core::sync::FileSystemSync;
+    let timestamp = FileSystemSync::extract_file_timestamp(&path);
+    
     Ok(TranscriptionResult {
         text: transcription.text,
         audio_path: file_path,
+        created_at: timestamp.to_rfc3339(),  // Convert to ISO string
     })
 }
 

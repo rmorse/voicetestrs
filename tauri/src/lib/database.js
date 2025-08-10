@@ -25,7 +25,7 @@ export async function initDatabase() {
 // Get transcriptions with filtering
 export async function getTranscriptions(filter = {}) {
   const { 
-    status = 'complete', 
+    status, // Don't set a default - let null mean "all statuses"
     limit = 50, 
     offset = 0,
     orderBy = 'created_at DESC'
@@ -36,7 +36,8 @@ export async function getTranscriptions(filter = {}) {
   let query = 'SELECT * FROM transcriptions WHERE 1=1';
   const params = [];
   
-  if (status) {
+  // Only add status filter if explicitly provided and not null
+  if (status !== null && status !== undefined) {
     query += ' AND status = ?';
     params.push(status);
   }
@@ -76,7 +77,7 @@ export async function getTranscription(id) {
   return result[0] || null;
 }
 
-// Insert a new transcription
+// Insert or update a transcription
 export async function insertTranscription(transcription) {
   const db = await initDatabase();
   
@@ -86,6 +87,21 @@ export async function insertTranscription(transcription) {
       created_at, duration_seconds, file_size_bytes,
       language, model, status, source, metadata
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      audio_path = COALESCE(excluded.audio_path, transcriptions.audio_path),
+      text_path = COALESCE(excluded.text_path, transcriptions.text_path),
+      transcription_text = COALESCE(excluded.transcription_text, transcriptions.transcription_text),
+      duration_seconds = excluded.duration_seconds,
+      file_size_bytes = excluded.file_size_bytes,
+      language = excluded.language,
+      model = excluded.model,
+      status = CASE 
+        WHEN excluded.status = 'complete' THEN 'complete'
+        WHEN transcriptions.status = 'complete' THEN 'complete'
+        ELSE excluded.status
+      END,
+      source = excluded.source,
+      metadata = COALESCE(excluded.metadata, transcriptions.metadata)
   `;
   
   const params = [
@@ -249,6 +265,21 @@ export async function getDatabaseStats() {
     total_duration: 0,
     total_size: 0
   };
+}
+
+// Clean up duplicate transcriptions (keep the one with proper paths)
+export async function cleanupDuplicates() {
+  const db = await initDatabase();
+  
+  // Delete entries with Windows absolute paths (they're duplicates)
+  const query = `
+    DELETE FROM transcriptions 
+    WHERE audio_path LIKE '\\\\?\\%'
+       OR audio_path LIKE 'C:%'
+       OR audio_path LIKE 'D:%'
+  `;
+  
+  return await db.execute(query);
 }
 
 // Export all functions for use in React components
