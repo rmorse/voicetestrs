@@ -1,4 +1,5 @@
 mod commands;
+mod db_commands;
 
 use std::sync::Arc;
 use std::process::Command;
@@ -13,6 +14,7 @@ use tauri::{
     AppHandle,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -80,9 +82,30 @@ pub fn run() {
     context.config_mut().build.dev_url = Some(url);
   }
 
+  // Database migrations
+  let migrations = vec![
+    Migration {
+      version: 1,
+      description: "Initial schema",
+      sql: include_str!("../migrations/001_initial.sql"),
+      kind: MigrationKind::Up,
+    },
+    Migration {
+      version: 2,
+      description: "Add full-text search",
+      sql: include_str!("../migrations/002_fts.sql"),
+      kind: MigrationKind::Up,
+    },
+  ];
+
   tauri::Builder::default()
     .plugin(tauri_plugin_localhost::Builder::new(port).build())
     .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+    .plugin(
+      tauri_plugin_sql::Builder::default()
+        .add_migrations("sqlite:voicetextrs.db", migrations)
+        .build(),
+    )
     .manage(app_state)
     .invoke_handler(tauri::generate_handler![
       commands::start_recording,
@@ -90,6 +113,14 @@ pub fn run() {
       commands::quick_note,
       commands::transcribe_file,
       commands::get_recording_status,
+      db_commands::db_get_transcriptions,
+      db_commands::db_search_transcriptions,
+      db_commands::db_insert_transcription,
+      db_commands::db_update_transcription_status,
+      db_commands::db_get_queue_status,
+      db_commands::db_enqueue_task,
+      db_commands::db_retry_task,
+      db_commands::db_clear_completed_tasks,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {

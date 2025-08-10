@@ -1,7 +1,7 @@
 # Transcription Synchronization Architecture Plan
 
 ## Overview
-Create a robust system where the `notes/` folder is the single source of truth for all transcriptions, with the UI always reflecting the current state of the file system.
+Create a robust system using SQLite as the metadata store with the `notes/` folder for audio/text files. The database provides fast queries, search, and state management while files remain accessible and portable.
 
 ## Current State Analysis
 
@@ -37,31 +37,35 @@ notes/
 ## Proposed Architecture
 
 ### Core Principles
-1. **File System as Source of Truth** - All data comes from disk
-2. **Lazy Loading** - Load metadata first, content on demand
-3. **Real-time Sync** - Watch for file system changes
+1. **Hybrid Storage** - SQLite for metadata/search, files for audio/text
+2. **Database-First Queries** - All UI data comes from database
+3. **Real-time Sync** - File changes update database automatically
 4. **Graceful Degradation** - Handle missing/corrupt files
-5. **Performance First** - Cache intelligently, paginate when needed
+5. **Performance First** - Indexed queries, full-text search
 
 ## Implementation Design
 
-### 1. Backend: Transcription Service
+### 1. Backend: Database-Driven Service
 
-#### A. Core Data Structure
+#### A. Database Integration
 ```rust
+// Using Tauri SQL Plugin
+use tauri_plugin_sql::{Pool};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transcription {
-    pub id: String,              // HHMMSS from filename
-    pub date: String,             // YYYY-MM-DD from path
-    pub timestamp: DateTime<Local>,
-    pub text: Option<String>,    // Lazy loaded
-    pub audio_path: PathBuf,
-    pub text_path: Option<PathBuf>,
-    pub metadata_path: Option<PathBuf>,
-    pub duration: f64,
+    pub id: String,              // YYYYMMDD-HHMMSS format
+    pub audio_path: String,      // Relative path from notes/
+    pub text_path: Option<String>,
+    pub transcription_text: Option<String>, // Cached in DB
+    pub created_at: DateTime<Local>,
+    pub transcribed_at: Option<DateTime<Local>>,
+    pub duration_seconds: f64,
+    pub file_size_bytes: i64,
     pub language: String,
-    pub file_size: u64,          // Audio file size
+    pub model: String,
     pub status: TranscriptionStatus,
+    pub source: TranscriptionSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,28 +77,36 @@ pub enum TranscriptionStatus {
 }
 ```
 
-#### B. Transcription Manager
+#### B. Database Manager
 ```rust
-pub struct TranscriptionManager {
-    notes_dir: PathBuf,
-    cache: Arc<RwLock<HashMap<String, Transcription>>>,
-    watcher: Option<FileWatcher>,
+pub struct DatabaseManager {
+    pool: Pool, // From Tauri SQL plugin
 }
 
-impl TranscriptionManager {
-    // Core operations
-    pub async fn load_all(&self) -> Vec<Transcription>
-    pub async fn load_recent(&self, limit: usize) -> Vec<Transcription>
-    pub async fn load_by_date_range(&self, start: Date, end: Date) -> Vec<Transcription>
-    pub async fn get_transcription_text(&self, id: &str) -> Option<String>
-    pub async fn delete_transcription(&self, id: &str) -> Result<()>
-    pub async fn search(&self, query: &str) -> Vec<Transcription>
-    pub async fn refresh(&self) -> Result<()>
+impl DatabaseManager {
+    // Core operations using SQL
+    pub async fn get_transcriptions(&self, limit: i32, offset: i32) -> Vec<Transcription> {
+        sqlx::query_as!(Transcription,
+            "SELECT * FROM transcriptions 
+             WHERE status = 'complete'
+             ORDER BY created_at DESC 
+             LIMIT ? OFFSET ?",
+            limit, offset
+        ).fetch_all(&self.pool).await
+    }
     
-    // File system operations
-    fn scan_directory(&self) -> Vec<Transcription>
-    fn parse_transcription_files(&self, dir: &Path) -> Option<Transcription>
-    fn watch_for_changes(&mut self) -> Result<()>
+    pub async fn search_transcriptions(&self, query: &str) -> Vec<Transcription> {
+        sqlx::query_as!(Transcription,
+            "SELECT t.* FROM transcriptions t
+             JOIN transcriptions_fts fts ON t.rowid = fts.rowid
+             WHERE fts.transcription_text MATCH ?
+             ORDER BY rank",
+            query
+        ).fetch_all(&self.pool).await
+    }
+    
+    pub async fn delete_transcription(&self, id: &str) -> Result<()>
+    pub async fn update_transcription_status(&self, id: &str, status: Status) -> Result<()>
 }
 ```
 
@@ -110,14 +122,19 @@ Use `notify` crate for cross-platform file watching:
 
 ### 3. Backend API (Tauri Commands)
 
-#### New Commands:
+#### New Commands with Database:
 ```rust
 #[tauri::command]
 async fn load_transcriptions(
-    state: State<TranscriptionManager>,
-    limit: Option<usize>,
-    offset: Option<usize>
-) -> Result<Vec<Transcription>>
+    db: State<DatabaseManager>,
+    limit: Option<i32>,
+    offset: Option<i32>
+) -> Result<Vec<Transcription>> {
+    db.get_transcriptions(
+        limit.unwrap_or(50),
+        offset.unwrap_or(0)
+    ).await
+}
 
 #[tauri::command]
 async fn get_transcription_text(
@@ -144,21 +161,32 @@ async fn export_transcriptions(
 ) -> Result<String>
 ```
 
-### 4. Frontend: React State Management
+### 4. Frontend: Database-Driven UI
 
-#### A. Transcription Store
+#### A. Using Tauri SQL Plugin
 ```javascript
-// State structure
-const [transcriptions, setTranscriptions] = useState([])
-const [loading, setLoading] = useState(true)
-const [filter, setFilter] = useState({ 
-  dateRange: null, 
-  searchQuery: '', 
-  status: 'all' 
-})
-const [selectedTranscription, setSelectedTranscription] = useState(null)
-const [page, setPage] = useState(1)
-const [hasMore, setHasMore] = useState(true)
+import Database from '@tauri-apps/plugin-sql';
+
+// Initialize database connection
+const db = await Database.load('sqlite:voicetextrs.db');
+
+// Query transcriptions directly
+const transcriptions = await db.select(
+  `SELECT * FROM transcriptions 
+   WHERE status = 'complete' 
+   ORDER BY created_at DESC 
+   LIMIT ? OFFSET ?`,
+  [50, 0]
+);
+
+// Full-text search
+const results = await db.select(
+  `SELECT t.* FROM transcriptions t
+   JOIN transcriptions_fts fts ON t.rowid = fts.rowid
+   WHERE fts.transcription_text MATCH ?
+   ORDER BY rank`,
+  [searchQuery]
+);
 ```
 
 #### B. Data Flow
@@ -223,10 +251,11 @@ const loadMore = () => {
 
 ### 6. Advanced Features
 
-#### A. Full-Text Search
-- Index transcription text for fast searching
-- Support fuzzy matching
-- Highlight search terms in results
+#### A. Full-Text Search (Built-in with SQLite FTS5)
+- Automatic indexing with FTS5 virtual table
+- Porter stemming and Unicode support
+- Ranked results with relevance scoring
+- Phrase and boolean searches
 
 #### B. Export Functionality
 - Export single or multiple transcriptions
@@ -238,15 +267,11 @@ const loadMore = () => {
 - Batch delete, export, or tag
 - Undo/redo support
 
-#### D. Smart Caching
-```rust
-struct CacheStrategy {
-    max_items: usize,        // Maximum cached items
-    max_memory: usize,       // Maximum memory usage
-    ttl: Duration,           // Time to live
-    preload_recent: usize,   // Number of recent items to preload
-}
-```
+#### D. Database Performance
+- SQLite handles caching automatically
+- Indexed queries for instant results
+- Connection pooling via Tauri SQL plugin
+- WAL mode for concurrent reads
 
 ### 7. Migration & Backward Compatibility
 
@@ -288,16 +313,17 @@ struct CacheStrategy {
 
 ### 10. Implementation Phases
 
-#### Phase 1: Core Infrastructure (4-6 hours)
-- [ ] Create TranscriptionManager service
-- [ ] Implement file scanning and parsing
-- [ ] Add basic Tauri commands
-- [ ] Load historical transcriptions on startup
+#### Phase 1: Database Setup (3-4 hours)
+- [ ] Install Tauri SQL plugin
+- [ ] Create database schema and migrations
+- [ ] Implement DatabaseManager
+- [ ] Migrate existing data to database
 
-#### Phase 2: Real-time Sync (2-3 hours)
-- [ ] Implement file system watcher
-- [ ] Add change events and UI updates
-- [ ] Handle concurrent modifications
+#### Phase 2: File System Sync (3-4 hours)
+- [ ] Implement FileSystemSync for startup
+- [ ] Add file system watcher
+- [ ] Update database on file changes
+- [ ] Handle orphaned files
 
 #### Phase 3: UI Enhancements (3-4 hours)
 - [ ] Add search and filtering
@@ -338,8 +364,8 @@ struct CacheStrategy {
 
 ## Success Metrics
 
-- Load 1000+ transcriptions in < 500ms
-- Search results in < 100ms
-- File system changes reflected in < 1s
-- Memory usage < 100MB for 10,000 transcriptions
-- Zero data loss during operations
+- Load 10,000 transcriptions in < 100ms (indexed DB query)
+- Search 10,000 transcriptions in < 50ms (FTS5)
+- File system changes reflected in < 500ms
+- Database size < 50MB for 10,000 transcriptions
+- Zero data loss with ACID transactions

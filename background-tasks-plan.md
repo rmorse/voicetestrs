@@ -1,7 +1,7 @@
 # Background Task Queue System - Implementation Plan
 
 ## Overview
-Add a background task queue for processing orphaned audio files (audio without transcriptions) while maintaining the priority of user-initiated recordings.
+Add a database-backed background task queue for processing orphaned audio files (audio without transcriptions) while maintaining the priority of user-initiated recordings. The queue state is stored in SQLite for persistence and atomic operations.
 
 ## Core Principles
 1. **User recordings always have priority** - Never interfere with active recording/processing
@@ -11,24 +11,22 @@ Add a background task queue for processing orphaned audio files (audio without t
 
 ## Architecture
 
-### 1. Task Queue Data Model
+### 1. Database-Backed Task Queue
 
-```rust
-// src/core/task_queue.rs
+Tasks are stored in the `background_tasks` table with atomic operations for claiming and updating:
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackgroundTask {
-    pub id: String,                    // Unique task ID
-    pub task_type: TaskType,
-    pub priority: TaskPriority,
-    pub status: TaskStatus,
-    pub created_at: DateTime<Local>,
-    pub started_at: Option<DateTime<Local>>,
-    pub completed_at: Option<DateTime<Local>>,
-    pub retry_count: u8,
-    pub max_retries: u8,               // Default: 1
-    pub error: Option<String>,
-}
+```sql
+-- Queue operations are atomic
+UPDATE background_tasks
+SET status = 'processing', started_at = CURRENT_TIMESTAMP
+WHERE id = (
+    SELECT id FROM background_tasks
+    WHERE status = 'pending'
+    ORDER BY priority DESC, created_at
+    LIMIT 1
+)
+RETURNING *;
+```
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TaskType {
@@ -62,40 +60,39 @@ pub enum TaskStatus {
 }
 ```
 
-### 2. Queue Manager
+### 2. Queue Manager with Database
 
 ```rust
 // src/core/queue_manager.rs
 
 pub struct QueueManager {
-    tasks: Arc<RwLock<VecDeque<BackgroundTask>>>,
-    active_task: Arc<RwLock<Option<BackgroundTask>>>,
-    is_paused: Arc<AtomicBool>,
-    should_stop: Arc<AtomicBool>,
-    worker_handle: Option<JoinHandle<()>>,
-    app_state: Arc<Mutex<RecordingState>>, // Share with main app
+    db: Arc<DatabaseManager>,          // All state in database
+    is_paused: Arc<AtomicBool>,        // Runtime flag only
+    app_state: Arc<Mutex<RecordingState>>,
     transcriber: Arc<Transcriber>,
+    worker_handle: Option<JoinHandle<()>>,
 }
 
 impl QueueManager {
-    pub fn new(app_state: Arc<Mutex<RecordingState>>) -> Self;
+    // All operations via database
+    pub async fn add_task(&self, task: BackgroundTask) {
+        sqlx::query!(
+            "INSERT INTO background_tasks (transcription_id, task_type, priority, payload)
+             VALUES (?, ?, ?, ?)",
+            task.transcription_id, task.task_type, task.priority, task.payload
+        ).execute(&self.db.pool).await
+    }
     
-    // Core operations
-    pub async fn add_task(&self, task: BackgroundTask);
-    pub async fn get_queue_status(&self) -> QueueStatus;
-    pub async fn pause(&self);
-    pub async fn resume(&self);
-    pub async fn retry_failed(&self, task_id: String);
-    pub async fn clear_completed(&self);
-    
-    // Worker management
-    fn start_worker(&mut self);
-    async fn process_next_task(&self) -> Result<()>;
-    async fn should_process(&self) -> bool;
-    
-    // Persistence
-    pub async fn save_state(&self) -> Result<()>;
-    pub async fn load_state(&mut self) -> Result<()>;
+    pub async fn get_queue_status(&self) -> QueueStatus {
+        // Single SQL query for all counts
+        sqlx::query!(
+            "SELECT 
+                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+                COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing,
+                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
+             FROM background_tasks"
+        ).fetch_one(&self.db.pool).await
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,49 +106,45 @@ pub struct QueueStatus {
 }
 ```
 
-### 3. Processing Logic
+### 3. Processing Logic with Database
 
 ```rust
 async fn should_process(&self) -> bool {
-    // Check if we should start processing a new task
     if self.is_paused.load(Ordering::Relaxed) {
         return false;
     }
     
     let app_state = self.app_state.lock().await;
     match *app_state {
-        RecordingState::Idle => {
-            // Safe to process background tasks
-            true
-        },
+        RecordingState::Idle => true,
         RecordingState::Recording | RecordingState::Processing => {
-            // User is actively recording/processing
-            if self.active_task.read().await.is_some() {
-                // Let current task finish but don't start new ones
-                true
-            } else {
-                // Don't start new tasks
-                false
-            }
+            // Check if task already processing via DB
+            let active = sqlx::query!(
+                "SELECT COUNT(*) as count FROM background_tasks 
+                 WHERE status = 'processing'"
+            ).fetch_one(&self.db.pool).await;
+            
+            active.count > 0  // Let current finish, don't start new
         }
     }
 }
 
 async fn process_next_task(&self) -> Result<()> {
-    // Wait for right conditions
-    while !self.should_process().await {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        
-        if self.should_stop.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-    }
-    
-    // Get next task
-    let task = {
-        let mut tasks = self.tasks.write().await;
-        tasks.pop_front()
-    };
+    // Atomically claim next task from database
+    let task = sqlx::query_as!(
+        BackgroundTask,
+        r#"
+        UPDATE background_tasks
+        SET status = 'processing', started_at = CURRENT_TIMESTAMP
+        WHERE id = (
+            SELECT id FROM background_tasks
+            WHERE status = 'pending'
+            ORDER BY priority DESC, created_at
+            LIMIT 1
+        )
+        RETURNING *
+        "#
+    ).fetch_optional(&self.db.pool).await?;
     
     if let Some(mut task) = task {
         // Update status
@@ -172,71 +165,100 @@ async fn process_next_task(&self) -> Result<()> {
             },
         };
         
-        // Handle result
+        // Handle result with database updates
         match result {
             Ok(transcription) => {
-                task.status = TaskStatus::Completed;
-                task.completed_at = Some(Local::now());
-                save_transcription(transcription);
+                // Transaction: update task and transcription
+                let mut tx = self.db.pool.begin().await?;
+                
+                sqlx::query!(
+                    "UPDATE background_tasks SET status = 'completed',
+                     completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    task.id
+                ).execute(&mut tx).await?;
+                
+                sqlx::query!(
+                    "UPDATE transcriptions SET status = 'complete',
+                     transcription_text = ?, transcribed_at = CURRENT_TIMESTAMP
+                     WHERE id = ?",
+                    transcription.text, task.transcription_id
+                ).execute(&mut tx).await?;
+                
+                tx.commit().await?;
             },
             Err(e) => {
-                task.retry_count += 1;
                 if task.retry_count < task.max_retries {
-                    // Re-queue for retry
-                    task.status = TaskStatus::Pending;
-                    self.tasks.write().await.push_back(task.clone());
+                    // Reset for retry
+                    sqlx::query!(
+                        "UPDATE background_tasks SET status = 'pending',
+                         retry_count = retry_count + 1 WHERE id = ?",
+                        task.id
+                    ).execute(&self.db.pool).await?;
                 } else {
                     // Mark as failed
-                    task.status = TaskStatus::Failed { can_retry: true };
-                    task.error = Some(e.to_string());
+                    sqlx::query!(
+                        "UPDATE background_tasks SET status = 'failed',
+                         error_message = ? WHERE id = ?",
+                        e.to_string(), task.id
+                    ).execute(&self.db.pool).await?;
                 }
             }
         }
-        
-        // Clear active task
-        *self.active_task.write().await = None;
-        
-        // Save state to disk
-        self.save_state().await?;
     }
     
     Ok(())
 }
 ```
 
-### 4. File Discovery
+### 4. File Discovery with Database
 
 ```rust
 // src/core/orphan_scanner.rs
 
 pub struct OrphanScanner {
     notes_dir: PathBuf,
+    db: Arc<DatabaseManager>,
 }
 
 impl OrphanScanner {
-    pub async fn scan_for_orphans(&self) -> Vec<PathBuf> {
-        let mut orphans = Vec::new();
+    pub async fn scan_and_queue_orphans(&self) -> Result<usize> {
+        let mut count = 0;
+        
+        // Get existing records from database
+        let existing_ids = sqlx::query!(
+            "SELECT id FROM transcriptions"
+        ).fetch_all(&self.db.pool).await?;
         
         // Walk the notes directory
-        for entry in WalkDir::new(&self.notes_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in WalkDir::new(&self.notes_dir) {
             if let Some(ext) = entry.path().extension() {
-                // Check if it's an audio file
                 if ext == "wav" || ext == "mp3" || ext == "m4a" {
-                    // Check if transcription exists
-                    let txt_path = entry.path().with_extension("txt");
-                    let json_path = entry.path().with_extension("json");
+                    let id = extract_id_from_path(entry.path());
                     
-                    if !txt_path.exists() || !json_path.exists() {
-                        orphans.push(entry.path().to_path_buf());
+                    // Check if already in database
+                    if !existing_ids.contains(&id) {
+                        // Add to transcriptions table as orphaned
+                        sqlx::query!(
+                            "INSERT INTO transcriptions (id, audio_path, status, source)
+                             VALUES (?, ?, 'orphaned', 'orphan')",
+                            id, entry.path().to_str()
+                        ).execute(&self.db.pool).await?;
+                        
+                        // Add to background queue
+                        sqlx::query!(
+                            "INSERT INTO background_tasks 
+                             (transcription_id, task_type, priority, payload)
+                             VALUES (?, 'transcribe_orphan', 0, ?)",
+                            id, json!({"audio_path": entry.path()})
+                        ).execute(&self.db.pool).await?;
+                        
+                        count += 1;
                     }
                 }
             }
         }
         
-        orphans
+        Ok(count)
     }
     
     pub fn is_imported_file(path: &Path) -> bool {
@@ -440,15 +462,16 @@ pub async fn clear_completed_tasks(
 ```rust
 // In lib.rs setup()
 
-// 1. Initialize queue manager
-let queue_manager = QueueManager::new(app_state.state.clone());
+// 1. Initialize database
+let db = DatabaseManager::new(pool).await?;
 
-// 2. Load persisted queue state
-queue_manager.load_state().await.ok();
+// 2. Initialize queue manager with database
+let queue_manager = QueueManager::new(db.clone(), app_state.state.clone());
 
-// 3. Scan for orphaned files
-let scanner = OrphanScanner::new(notes_dir);
-let orphans = scanner.scan_for_orphans().await;
+// 3. Scan for orphaned files and queue them
+let scanner = OrphanScanner::new(notes_dir, db.clone());
+let orphan_count = scanner.scan_and_queue_orphans().await?;
+info!("Found {} orphaned audio files", orphan_count);
 
 // 4. Add orphans to queue (if not already queued)
 for orphan_path in orphans {
@@ -494,34 +517,24 @@ queue_manager.start_worker();
 // Background queue will automatically resume
 ```
 
-### 9. Persistence
+### 9. Database Persistence
 
-```json
-// queue_state.json (in app data directory)
-{
-  "version": "1.0",
-  "is_paused": false,
-  "tasks": [
-    {
-      "id": "task_abc123",
-      "task_type": {
-        "TranscribeOrphan": {
-          "audio_path": "notes/2024/2024-01-15/143022-voice-note.wav",
-          "output_path": "notes/2024/2024-01-15/143022-voice-note.txt"
-        }
-      },
-      "priority": "Low",
-      "status": "Pending",
-      "created_at": "2024-01-15T14:30:22Z",
-      "started_at": null,
-      "completed_at": null,
-      "retry_count": 0,
-      "max_retries": 1,
-      "error": null
-    }
-  ]
-}
+All queue state is stored in the database - no separate JSON files needed:
+
+```sql
+-- Queue state is always consistent
+SELECT 
+    (SELECT COUNT(*) FROM background_tasks WHERE status = 'pending') as pending,
+    (SELECT COUNT(*) FROM background_tasks WHERE status = 'processing') as processing,
+    (SELECT COUNT(*) FROM background_tasks WHERE status = 'failed') as failed,
+    (SELECT value FROM app_state WHERE key = 'queue_paused') as is_paused;
 ```
+
+The database provides:
+- **Atomic operations** - No race conditions
+- **Crash recovery** - Automatic on restart
+- **Query efficiency** - Indexed lookups
+- **Transaction safety** - All-or-nothing updates
 
 ## Implementation Phases
 
