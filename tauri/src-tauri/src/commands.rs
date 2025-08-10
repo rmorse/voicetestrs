@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 use voicetextrs::core::audio::AudioRecorder;
 use voicetextrs::core::transcription::Transcriber;
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingState {
+    Idle,
+    Recording,
+    Processing,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranscriptionResult {
     pub text: String,
@@ -16,7 +24,7 @@ pub struct TranscriptionResult {
 pub struct AppState {
     pub recorder: Arc<Mutex<Option<AudioRecorder>>>,
     pub transcriber: Arc<Transcriber>,
-    pub is_recording: Arc<Mutex<bool>>,
+    pub state: Arc<Mutex<RecordingState>>,
 }
 
 #[tauri::command]
@@ -24,9 +32,10 @@ pub async fn start_recording(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Check if already recording
-    if *state.is_recording.lock().await {
-        return Err("Already recording".to_string());
+    // Check current state - must be Idle to start recording
+    let current_state = *state.state.lock().await;
+    if current_state != RecordingState::Idle {
+        return Err(format!("Cannot start recording in {:?} state", current_state));
     }
     
     // Use the pre-initialized recorder
@@ -37,14 +46,15 @@ pub async fn start_recording(
         recorder.start_recording()
             .map_err(|e| format!("Failed to start recording: {}", e))?;
         
-        *state.is_recording.lock().await = true;
+        // Update state to Recording
+        *state.state.lock().await = RecordingState::Recording;
     } else {
         return Err("Recorder not initialized".to_string());
     }
     
-    // Emit event to frontend
-    app.emit("recording-status", serde_json::json!({
-        "isRecording": true
+    // Emit state change event to frontend
+    app.emit("state-changed", serde_json::json!({
+        "state": "recording"
     })).map_err(|e| e.to_string())?;
     
     Ok(())
@@ -55,13 +65,19 @@ pub async fn stop_recording(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TranscriptionResult, String> {
-    // Check if actually recording
-    if !*state.is_recording.lock().await {
-        return Err("Not recording".to_string());
+    // Check current state - must be Recording to stop
+    let current_state = *state.state.lock().await;
+    if current_state != RecordingState::Recording {
+        return Err(format!("Cannot stop recording in {:?} state", current_state));
     }
     
-    // Set flag to false immediately to prevent double-stops
-    *state.is_recording.lock().await = false;
+    // Set state to Processing immediately
+    *state.state.lock().await = RecordingState::Processing;
+    
+    // Emit state change to show processing UI
+    app.emit("state-changed", serde_json::json!({
+        "state": "processing"
+    })).map_err(|e| e.to_string())?;
     
     let mut recorder_lock = state.recorder.lock().await;
     
@@ -70,23 +86,42 @@ pub async fn stop_recording(
         recorder.stop_recording()
             .map_err(|e| format!("Failed to stop recording: {}", e))?
     } else {
+        // If error, set state back to Idle
+        *state.state.lock().await = RecordingState::Idle;
+        app.emit("state-changed", serde_json::json!({
+            "state": "idle"
+        })).ok();
         return Err("Recorder not initialized".to_string());
     };
     
-    // Emit status update
-    app.emit("recording-status", serde_json::json!({
-        "isRecording": false
-    })).map_err(|e| e.to_string())?;
+    // Release the recorder lock before transcribing
+    drop(recorder_lock);
     
     // Transcribe the audio
-    let transcription = state.transcriber.transcribe(&audio_path)
-        .await
-        .map_err(|e| format!("Transcription failed: {}", e))?;
+    let transcription = match state.transcriber.transcribe(&audio_path).await {
+        Ok(t) => t,
+        Err(e) => {
+            // If transcription fails, set state back to Idle
+            *state.state.lock().await = RecordingState::Idle;
+            app.emit("state-changed", serde_json::json!({
+                "state": "idle"
+            })).ok();
+            return Err(format!("Transcription failed: {}", e));
+        }
+    };
     
     let result = TranscriptionResult {
         text: transcription.text.clone(),
         audio_path: audio_path.to_string_lossy().to_string(),
     };
+    
+    // Set state back to Idle after successful transcription
+    *state.state.lock().await = RecordingState::Idle;
+    
+    // Emit state change back to idle
+    app.emit("state-changed", serde_json::json!({
+        "state": "idle"
+    })).map_err(|e| e.to_string())?;
     
     // Emit transcription complete event
     app.emit("transcription-complete", &result)
@@ -101,9 +136,10 @@ pub async fn quick_note(
     state: State<'_, AppState>,
     duration: u64,
 ) -> Result<TranscriptionResult, String> {
-    // Check if already recording
-    if *state.is_recording.lock().await {
-        return Err("Already recording".to_string());
+    // Check current state - must be Idle to start
+    let current_state = *state.state.lock().await;
+    if current_state != RecordingState::Idle {
+        return Err(format!("Cannot start quick note in {:?} state", current_state));
     }
     
     // Start recording using the pre-initialized recorder
@@ -111,15 +147,15 @@ pub async fn quick_note(
     if let Some(recorder) = recorder_lock.as_mut() {
         recorder.start_recording()
             .map_err(|e| format!("Failed to start recording: {}", e))?;
-        *state.is_recording.lock().await = true;
+        *state.state.lock().await = RecordingState::Recording;
     } else {
         return Err("Recorder not initialized".to_string());
     }
     drop(recorder_lock); // Release the lock before sleeping
     
-    // Emit event to frontend
-    app.emit("recording-status", serde_json::json!({
-        "isRecording": true
+    // Emit state change event
+    app.emit("state-changed", serde_json::json!({
+        "state": "recording"
     })).map_err(|e| e.to_string())?;
     
     // Wait for the specified duration
@@ -153,6 +189,6 @@ pub async fn transcribe_file(
 #[tauri::command]
 pub async fn get_recording_status(
     state: State<'_, AppState>,
-) -> Result<bool, String> {
-    Ok(*state.is_recording.lock().await)
+) -> Result<RecordingState, String> {
+    Ok(*state.state.lock().await)
 }

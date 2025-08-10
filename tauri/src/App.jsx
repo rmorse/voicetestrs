@@ -4,15 +4,15 @@ import { listen } from '@tauri-apps/api/event'
 import './App.css'
 
 function App() {
-  const [isRecording, setIsRecording] = useState(false)
+  const [appState, setAppState] = useState('idle') // 'idle' | 'recording' | 'processing'
   const [transcriptions, setTranscriptions] = useState([])
   const [recordingDuration, setRecordingDuration] = useState(0)
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    // Check initial recording status on mount
-    invoke('get_recording_status').then(status => {
-      setIsRecording(status)
+    // Check initial state on mount
+    invoke('get_recording_status').then(state => {
+      setAppState(state)
     }).catch(console.error)
 
     // Listen for transcription events from backend
@@ -25,67 +25,44 @@ function App() {
       }, ...prev])
     })
 
-    // Listen for recording status changes
-    const unlistenStatus = listen('recording-status', (event) => {
-      console.log('Recording status event:', event.payload)
-      setIsRecording(event.payload.isRecording)
-      if (!event.payload.isRecording) {
+    // Listen for state changes
+    const unlistenStatus = listen('state-changed', (event) => {
+      console.log('State changed:', event.payload.state)
+      setAppState(event.payload.state)
+      if (event.payload.state !== 'recording') {
         setRecordingDuration(0)
       }
     })
 
-    // Listen for recording started event (from tray/hotkeys)
-    const unlistenStarted = listen('recording-started', () => {
-      console.log('Recording started event received')
-      setIsRecording(true)
-      setRecordingDuration(0)
-    })
-
-    // Listen for recording stopped event (from tray/hotkeys)
-    const unlistenStopped = listen('recording-stopped', (event) => {
-      console.log('Recording stopped event received')
-      setIsRecording(false)
-      setRecordingDuration(0)
-      // Add the transcription to the list
-      setTranscriptions(prev => [{
-        id: Date.now(),
-        text: event.payload.transcription,
-        timestamp: new Date().toLocaleString(),
-        audioPath: event.payload.audio_path
-      }, ...prev])
-    })
+    // No need for separate started/stopped events anymore - state-changed handles it
 
     return () => {
       unlisten.then(fn => fn())
       unlistenStatus.then(fn => fn())
-      unlistenStarted.then(fn => fn())
-      unlistenStopped.then(fn => fn())
     }
   }, [])
 
   useEffect(() => {
     let interval
-    if (isRecording) {
+    if (appState === 'recording') {
       interval = setInterval(() => {
         setRecordingDuration(prev => prev + 1)
       }, 1000)
     }
     return () => clearInterval(interval)
-  }, [isRecording])
+  }, [appState])
 
   const toggleRecording = async () => {
     try {
       setError(null)
-      if (isRecording) {
-        // Just call stop_recording, don't handle the result
-        // The transcription will be added via the "transcription-complete" event listener
-        // The recording state will be updated via the "recording-status" event listener
+      if (appState === 'recording') {
+        // Stop recording - state will change to 'processing' then 'idle'
         await invoke('stop_recording')
-      } else {
-        // Just call start_recording
-        // The recording state will be updated via the "recording-status" event listener
+      } else if (appState === 'idle') {
+        // Start recording - state will change to 'recording'
         await invoke('start_recording')
       }
+      // If processing, do nothing (button should be disabled)
     } catch (err) {
       setError(err.toString())
     }
@@ -94,7 +71,9 @@ function App() {
   const quickNote = async () => {
     try {
       setError(null)
-      await invoke('quick_note', { duration: 10 })
+      if (appState === 'idle') {
+        await invoke('quick_note', { duration: 10 })
+      }
     } catch (err) {
       setError(err.toString())
     }
@@ -127,27 +106,39 @@ function App() {
         <div className="recording-section">
           <div className="recording-controls">
             <button 
-              className={`record-button ${isRecording ? 'recording' : ''}`}
+              className={`record-button ${appState === 'recording' ? 'recording' : ''} ${appState === 'processing' ? 'processing' : ''}`}
               onClick={toggleRecording}
+              disabled={appState === 'processing'}
             >
-              <span className="record-icon">{isRecording ? '⏹' : '🎤'}</span>
-              {isRecording ? 'Stop Recording' : 'Start Recording'}
+              <span className={`record-icon ${appState === 'processing' ? 'spinning' : ''}`}>
+                {appState === 'idle' ? '🎤' : appState === 'recording' ? '⏹' : '⚙️'}
+              </span>
+              {appState === 'idle' ? 'Start Recording' : 
+               appState === 'recording' ? 'Stop Recording' : 
+               'Processing...'}
             </button>
             
             <button 
               className="quick-note-button"
               onClick={quickNote}
-              disabled={isRecording}
+              disabled={appState !== 'idle'}
             >
               <span className="icon">⚡</span>
               Quick Note (10s)
             </button>
           </div>
 
-          {isRecording && (
+          {appState === 'recording' && (
             <div className="recording-status">
               <div className="recording-indicator"></div>
               <span>Recording... {formatDuration(recordingDuration)}</span>
+            </div>
+          )}
+          
+          {appState === 'processing' && (
+            <div className="processing-status">
+              <div className="spinner"></div>
+              <span>Transcribing audio...</span>
             </div>
           )}
         </div>

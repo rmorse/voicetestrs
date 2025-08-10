@@ -5,7 +5,7 @@ use std::process::Command;
 use tokio::sync::Mutex;
 use voicetextrs::core::transcription::Transcriber;
 use voicetextrs::core::audio::AudioRecorder;
-use commands::AppState;
+use commands::{AppState, RecordingState};
 use tauri::{
     Manager, Emitter,
     tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
@@ -69,7 +69,7 @@ pub fn run() {
   let app_state = AppState {
     recorder: Arc::new(Mutex::new(Some(recorder))),
     transcriber: Arc::new(Transcriber::new().expect("Failed to create transcriber")),
-    is_recording: Arc::new(Mutex::new(false)),
+    state: Arc::new(Mutex::new(RecordingState::Idle)),
   };
 
   let mut context = tauri::generate_context!();
@@ -281,11 +281,11 @@ fn toggle_window_visibility(app: &AppHandle) {
 }
 
 async fn toggle_recording(app: &AppHandle) {
-    // Check if currently recording
+    // Check current state
     let state = app.state::<AppState>();
-    let is_recording = *state.is_recording.lock().await;
+    let current_state = *state.state.lock().await;
     
-    if is_recording {
+    if current_state == RecordingState::Recording {
         println!("Stopping recording via hotkey");
         if let Err(e) = stop_recording_from_tray(app).await {
             eprintln!("Failed to stop recording: {}", e);
@@ -301,9 +301,10 @@ async fn toggle_recording(app: &AppHandle) {
 pub async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<AppState>();
     
-    // Check if already recording
-    if *state.is_recording.lock().await {
-        println!("Already recording, ignoring start request");
+    // Check current state - must be Idle
+    let current_state = *state.state.lock().await;
+    if current_state != RecordingState::Idle {
+        println!("Cannot start recording in {:?} state", current_state);
         return Ok(());
     }
     
@@ -311,15 +312,17 @@ pub async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn st
     let mut recorder_lock = state.recorder.lock().await;
     if let Some(recorder) = recorder_lock.as_mut() {
         recorder.start_recording()?;
-        *state.is_recording.lock().await = true;
+        *state.state.lock().await = RecordingState::Recording;
     } else {
         return Err("Recorder not initialized".into());
     }
     
     // TODO: Update tray menu text when Tauri supports it
     
-    // Emit event to update UI if window is visible
-    app.emit("recording-started", ())?;
+    // Emit state change event
+    app.emit("state-changed", serde_json::json!({
+        "state": "recording"
+    }))?;
     
     println!("Recording started from tray");
     Ok(())
@@ -328,14 +331,20 @@ pub async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn st
 pub async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<AppState>();
     
-    // Check if actually recording
-    if !*state.is_recording.lock().await {
-        println!("Not recording, ignoring stop request");
+    // Check current state - must be Recording
+    let current_state = *state.state.lock().await;
+    if current_state != RecordingState::Recording {
+        println!("Cannot stop recording in {:?} state", current_state);
         return Ok(());
     }
     
-    // Set recording flag to false immediately to prevent double-stops
-    *state.is_recording.lock().await = false;
+    // Set state to Processing immediately
+    *state.state.lock().await = RecordingState::Processing;
+    
+    // Emit state change to show processing UI
+    app.emit("state-changed", serde_json::json!({
+        "state": "processing"
+    }))?;
     
     // Stop recording but keep the recorder alive (don't take it)
     let path = {
@@ -367,9 +376,17 @@ pub async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std
     });
     std::fs::write(&meta_path, serde_json::to_string_pretty(&metadata)?)?;
     
-    // Emit event to update UI if window is visible
-    app.emit("recording-stopped", serde_json::json!({
-        "transcription": result.text,
+    // Set state back to Idle
+    *state.state.lock().await = RecordingState::Idle;
+    
+    // Emit state change back to idle
+    app.emit("state-changed", serde_json::json!({
+        "state": "idle"
+    }))?;
+    
+    // Emit transcription complete event
+    app.emit("transcription-complete", serde_json::json!({
+        "text": result.text,
         "audio_path": path.to_string_lossy(),
         "text_path": text_path.to_string_lossy(),
     }))?;
