@@ -122,13 +122,12 @@ function App() {
     // Listen for individual transcription sync events
     const unlistenSyncTranscription = listen('sync-transcription', async (event) => {
       const transcription = event.payload
-      console.log('Received sync-transcription event:', transcription)
+      
       try {
-        // Use upsert (insert or update) for syncing
-        console.log('Upserting transcription:', transcription.id)
-        const insertResult = await db.insertTranscription(transcription)
-        console.log('Upsert result:', insertResult)
-        console.log('Successfully synced transcription:', transcription.id)
+        // Backend only sends events for files that need syncing (orphaned, failed, pending)
+        // Completed files are NOT sent, so we can directly insert/update
+        console.log('Syncing transcription:', transcription.id, 'status:', transcription.status)
+        await db.insertTranscription(transcription)
       } catch (err) {
         console.error('Failed to sync transcription:', err)
       }

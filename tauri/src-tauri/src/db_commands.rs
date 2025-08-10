@@ -128,11 +128,28 @@ pub async fn sync_filesystem(
     
     println!("Found {} audio files", audio_files.len());
     
+    // Create a smart sync event that includes sync strategy
     for audio_path in audio_files {
         if let Ok(transcription) = sync.get_transcription_for_insert(&audio_path) {
-            // Emit event with transcription data for JavaScript to insert
-            app.emit("sync-transcription", &transcription)
-                .map_err(|e| format!("Failed to emit event: {}", e))?;
+            // Only emit sync events for files that need syncing:
+            // 1. Orphaned files (no transcription text)
+            // 2. Failed or pending files
+            // Skip completed transcriptions - frontend already has them
+            use voicetextrs::core::database::TranscriptionStatus;
+            
+            let needs_sync = match &transcription.status {
+                TranscriptionStatus::Orphaned => true,  // Always sync orphaned files
+                TranscriptionStatus::Failed => true,    // Always sync failed files
+                TranscriptionStatus::Pending => true,   // Always sync pending files
+                TranscriptionStatus::Processing => true, // Always sync processing files
+                TranscriptionStatus::Complete => false,  // SKIP completed - already in DB!
+            };
+            
+            if needs_sync {
+                // Emit event with transcription data for JavaScript to insert
+                app.emit("sync-transcription", &transcription)
+                    .map_err(|e| format!("Failed to emit event: {}", e))?;
+            }
         }
     }
     
