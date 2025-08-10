@@ -118,9 +118,19 @@ voicetextrs/
 │   ├── src/            # React frontend
 │   │   ├── App.jsx         # Main React component
 │   │   ├── App.css         # Styling
+│   │   ├── lib/
+│   │   │   └── api.js      # Backend API client
 │   │   └── main.jsx        # Entry point
 │   ├── src-tauri/      # Tauri backend
 │   │   ├── src/
+│   │   │   ├── api/        # API layer
+│   │   │   │   └── transcriptions.rs # Database APIs
+│   │   │   ├── database/   # SQLx database layer
+│   │   │   │   ├── mod.rs      # Database manager
+│   │   │   │   ├── models.rs   # Data models
+│   │   │   │   └── utils.rs    # Path normalization
+│   │   │   ├── sync/       # Filesystem sync
+│   │   │   │   └── mod.rs      # Smart sync logic
 │   │   │   ├── commands.rs # Tauri IPC commands
 │   │   │   ├── lib.rs      # Tauri app setup
 │   │   │   └── main.rs     # Entry point
@@ -178,6 +188,7 @@ cargo test
 - CPAL integration for cross-platform audio
 - WAV file generation with proper formatting
 - Device selection and listing
+- Pre-initialized audio stream for zero-latency recording
 
 ✅ **Phase 2: Transcription** - Complete  
 - Whisper.cpp integration via subprocess
@@ -197,7 +208,18 @@ cargo test
 - Dynamic port selection (no conflicts!)
 - Tauri IPC for frontend-backend communication
 
-⏳ **Phase 5: Voice Activity Detection** - Planned
+✅ **Phase 5: Database Integration** - Complete
+- SQLx backend database with SQLite
+- Smart filesystem sync with duplicate prevention
+- Path normalization for consistent storage
+- Full-text search capability (FTS5)
+- Clean API layer for all database operations
+
+⏳ **Phase 6: Background Tasks** - In Progress
+- Queue system for processing orphaned audio files
+- Priority-based task processing
+
+⏳ **Phase 7: Voice Activity Detection** - Planned
 - Auto-start/stop recording
 - Silence detection
 

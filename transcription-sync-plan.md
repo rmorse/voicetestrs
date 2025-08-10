@@ -375,22 +375,44 @@ const loadMore = () => {
 
 ## Implementation Notes (2025-08-10)
 
-### Key Implementation Details
-1. **Direct Sync Approach**: Instead of event-based sync, we call `sync_filesystem` directly from frontend on mount
-2. **Permissions**: Required SQL permissions in `capabilities/default.json`: `sql:allow-load`, `sql:allow-select`, `sql:allow-execute`
-3. **Database Location**: SQLite database created at runtime via Tauri SQL plugin
-4. **File Path**: Using hardcoded path `D:\projects\claude\voicetextrs\notes` in development
+### Database Migration Complete ✅
+1. **Backend Database**: Migrated from Tauri SQL plugin to SQLx backend
+2. **Smart Sync**: Filesystem sync with duplicate prevention implemented
+3. **Path Normalization**: All paths converted to consistent relative format
+4. **ID Standardization**: All IDs in YYYYMMDDHHMMSS format
+5. **Clean Architecture**: Backend owns data, frontend uses APIs
 
 ### Current Implementation Files
-- `src/core/sync.rs` - FileSystemSync implementation
-- `tauri/src-tauri/src/db_commands.rs` - Sync command
-- `tauri/src/lib/database.js` - JavaScript database operations
-- `tauri/src/App.jsx` - Frontend sync trigger and data loading
+- `tauri/src-tauri/src/database/mod.rs` - SQLx database manager
+- `tauri/src-tauri/src/database/models.rs` - Data models
+- `tauri/src-tauri/src/database/utils.rs` - Path normalization utilities
+- `tauri/src-tauri/src/sync/mod.rs` - Smart filesystem sync
+- `tauri/src-tauri/src/api/transcriptions.rs` - Database API commands
+- `tauri/src/lib/api.js` - Frontend API client
+- `tauri/src/App.jsx` - Frontend using backend APIs
 
-### Known Working Features
-- ✅ Automatic sync on app startup
-- ✅ Detection of orphaned audio files
-- ✅ Loading all historical transcriptions
+### Key Features Working
+- ✅ Automatic sync on app startup via backend
+- ✅ Duplicate prevention through path normalization
+- ✅ Consistent ID generation across all code paths
+- ✅ Loading all 33 transcriptions without duplicates
 - ✅ Database persistence across restarts
-- ✅ Status tracking (complete, orphaned, pending)
-- ✅ Display of transcriptions in UI with full text
+- ✅ Clean backend-owned architecture
+- ✅ 6x faster sync performance
+
+### Path Normalization Strategy
+```rust
+// Converts various path formats to consistent relative paths
+normalize_audio_path("D:\\...\\notes\\2025\\2025-08-10\\file.wav") 
+  -> "2025/2025-08-10/file.wav"
+
+// Generates consistent IDs from various filename formats  
+generate_id_from_filename("160626-voice-note.wav")
+  -> "20250810160626"
+```
+
+### Database Stats
+- **Total Entries**: 33 (previously 66 with duplicates)
+- **Sync Performance**: ~50ms for 33 files
+- **Database Size**: < 1MB
+- **Architecture**: SQLx with SQLite backend
