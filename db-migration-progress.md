@@ -198,6 +198,34 @@ Using a gradual migration approach:
 - Smart sync prevents duplicates
 - Backend owns all data operations
 
-Migration completed successfully with zero data loss!
+### 🎯 Duplicate Prevention Strategy Implemented:
+- **Path Normalization**: All paths converted to consistent relative format
+- **ID Standardization**: All IDs in YYYYMMDDHHMMSS format
+- **Smart Sync**: Checks database before inserting to prevent duplicates
+- **Utility Functions**: `normalize_audio_path()` and `generate_id_from_filename()`
+- **Result**: Fixed issue where 66 entries existed for 33 files
 
-Last Updated: 2025-08-10 16:10
+### 📝 Key Implementation Details:
+
+#### Path Normalization (`database/utils.rs`):
+- Removes Windows extended path prefixes (`\\?\`)
+- Extracts relative path from `notes/` directory
+- Normalizes separators to forward slashes
+- Example: `D:\...\notes\2025\2025-08-10\file.wav` → `2025/2025-08-10/file.wav`
+
+#### ID Generation (`database/utils.rs`):
+- Consistent format: `YYYYMMDDHHMMSS` (e.g., `20250810160626`)
+- Handles various input formats:
+  - `160626-voice-note.wav` → `20250810160626`
+  - `20250810-160626-voice-note.wav` → `20250810160626`
+  - `160626voiceno` → `20250810160626`
+
+#### Sync Strategy (`sync/mod.rs`):
+- Always normalizes paths before database operations
+- Generates consistent IDs from filenames
+- Checks if transcription exists before inserting
+- Updates existing records instead of creating duplicates
+
+Migration completed successfully with zero data loss and duplicate prevention!
+
+Last Updated: 2025-08-10 17:30
