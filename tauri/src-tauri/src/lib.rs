@@ -20,23 +20,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 pub fn run() {
   // We'll initialize the database later in setup when we have app handle
   
-  // Read the port from the file written by start-dev-server.js
-  let port = if cfg!(debug_assertions) {
-    let port_file = std::path::Path::new("../.current-port");
-    if port_file.exists() {
-      let port_str = std::fs::read_to_string(port_file)
-        .expect("Failed to read port file");
-      port_str.trim().parse::<u16>()
-        .expect("Invalid port in file")
-    } else {
-      // Fallback to default if file doesn't exist
-      5173
-    }
-  } else {
-    5173
-  };
-  
-  println!("Using port: {}", port);
+  // Use fixed port for development
+  let port = 5173;
   
   // Initialize the app state with pre-initialized recorder
   println!("Creating audio recorder...");
@@ -53,13 +38,7 @@ pub fn run() {
     state: Arc::new(Mutex::new(RecordingState::Idle)),
   };
 
-  let mut context = tauri::generate_context!();
-  
-  // Update the dev URL to use our dynamic port
-  if cfg!(debug_assertions) {
-    let url = format!("http://localhost:{}", port).parse().unwrap();
-    context.config_mut().build.dev_url = Some(url);
-  }
+  let context = tauri::generate_context!();
 
   tauri::Builder::default()
     .plugin(tauri_plugin_localhost::Builder::new(port).build())

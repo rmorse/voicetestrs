@@ -8,8 +8,8 @@ export default defineConfig({
     emptyOutDir: true
   },
   server: {
-    port: process.env.VITE_PORT ? parseInt(process.env.VITE_PORT) : 5173,
-    strictPort: true,  // Use exact port since we're finding it dynamically
+    port: 5173,
+    strictPort: false,  // Allow Vite to find next available port if 5173 is busy
     host: 'localhost',
     warmup: {
       clientFiles: ['./src/**/*']  // Pre-bundle client files

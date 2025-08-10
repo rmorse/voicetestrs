@@ -29,7 +29,8 @@
       "Bash(./whisper-cli.exe:*)",
       "Bash(./main.exe --help)",
       "Bash(./download-model.bat)",
-      "Bash(cargo:*)"
+      "Bash(cargo:*)",
+      "Bash(taskkill:*)"
     ],
     "deny": []
   }
