@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::process::Command;
 use tokio::sync::Mutex;
 use voicetextrs::core::transcription::Transcriber;
+use voicetextrs::core::audio::AudioRecorder;
 use commands::AppState;
 use tauri::{
     Manager, Emitter,
@@ -56,9 +57,17 @@ pub fn run() {
     std::thread::sleep(std::time::Duration::from_secs(5));
   }
   
-  // Initialize the app state
+  // Initialize the app state with pre-initialized recorder
+  println!("Creating audio recorder...");
+  let mut recorder = AudioRecorder::new().expect("Failed to create audio recorder");
+  
+  // Pre-initialize the audio stream to avoid delay when recording starts
+  println!("Pre-initializing audio stream to avoid recording delay...");
+  recorder.initialize_stream().expect("Failed to initialize audio stream");
+  println!("Audio stream pre-initialized successfully!");
+  
   let app_state = AppState {
-    recorder: Arc::new(Mutex::new(None)),
+    recorder: Arc::new(Mutex::new(Some(recorder))),
     transcriber: Arc::new(Transcriber::new().expect("Failed to create transcriber")),
     is_recording: Arc::new(Mutex::new(false)),
   };
@@ -298,11 +307,14 @@ pub async fn start_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn st
         return Ok(());
     }
     
-    // Start recording
-    let mut recorder = voicetextrs::core::audio::AudioRecorder::new()?;
-    recorder.start_recording()?;
-    *state.recorder.lock().await = Some(recorder);
-    *state.is_recording.lock().await = true;
+    // Use the pre-initialized recorder
+    let mut recorder_lock = state.recorder.lock().await;
+    if let Some(recorder) = recorder_lock.as_mut() {
+        recorder.start_recording()?;
+        *state.is_recording.lock().await = true;
+    } else {
+        return Err("Recorder not initialized".into());
+    }
     
     // TODO: Update tray menu text when Tauri supports it
     
@@ -325,11 +337,14 @@ pub async fn stop_recording_from_tray(app: &AppHandle) -> Result<(), Box<dyn std
     // Set recording flag to false immediately to prevent double-stops
     *state.is_recording.lock().await = false;
     
-    // Stop recording
-    let path = if let Some(mut recorder) = state.recorder.lock().await.take() {
-        recorder.stop_recording()?
-    } else {
-        return Err("No active recording".into());
+    // Stop recording but keep the recorder alive (don't take it)
+    let path = {
+        let mut recorder_lock = state.recorder.lock().await;
+        if let Some(recorder) = recorder_lock.as_mut() {
+            recorder.stop_recording()?
+        } else {
+            return Err("No active recording".into());
+        }
     };
     
     // TODO: Update tray menu text when Tauri supports it

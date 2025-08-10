@@ -20,6 +20,7 @@ pub struct AudioRecorder {
     buffer: Arc<Mutex<Vec<f32>>>,
     stream: Option<Stream>,
     is_recording: Arc<Mutex<bool>>,
+    is_initialized: bool,
 }
 
 impl AudioRecorder {
@@ -43,6 +44,7 @@ impl AudioRecorder {
             buffer: Arc::new(Mutex::new(Vec::new())),
             stream: None,
             is_recording: Arc::new(Mutex::new(false)),
+            is_initialized: false,
         })
     }
     
@@ -69,28 +71,31 @@ impl AudioRecorder {
             buffer: Arc::new(Mutex::new(Vec::new())),
             stream: None,
             is_recording: Arc::new(Mutex::new(false)),
+            is_initialized: false,
         })
     }
     
-    /// Start recording audio
-    pub fn start_recording(&mut self) -> Result<()> {
-        // Clear buffer
-        self.buffer.lock().unwrap().clear();
+    /// Initialize the audio stream (pre-warm the microphone)
+    pub fn initialize_stream(&mut self) -> Result<()> {
+        if self.is_initialized {
+            return Ok(());
+        }
         
-        // Set recording flag
-        *self.is_recording.lock().unwrap() = true;
+        info!("Initializing audio stream...");
         
         // Clone for move into closure
         let buffer = Arc::clone(&self.buffer);
         let is_recording = Arc::clone(&self.is_recording);
         
-        // Build input stream
+        // Build input stream that runs continuously
         let stream = self.device.build_input_stream(
             &self.config,
             move |data: &[f32], _: &_| {
+                // Only buffer data when actually recording
                 if *is_recording.lock().unwrap() {
                     buffer.lock().unwrap().extend_from_slice(data);
                 }
+                // Otherwise, data is discarded
             },
             |err| error!("Audio stream error: {}", err),
             None,
@@ -98,23 +103,35 @@ impl AudioRecorder {
         
         stream.play()?;
         self.stream = Some(stream);
+        self.is_initialized = true;
         
-        info!("Recording started");
+        info!("Audio stream initialized and running (not recording yet)");
         Ok(())
     }
     
-    /// Stop recording and save to WAV file
-    pub fn stop_recording(&mut self) -> Result<PathBuf> {
-        // Stop recording
-        *self.is_recording.lock().unwrap() = false;
-        
-        // Stop stream
-        if let Some(stream) = self.stream.take() {
-            stream.pause()?;
-            drop(stream);
+    /// Start recording audio (with pre-initialized stream)
+    pub fn start_recording(&mut self) -> Result<()> {
+        // Initialize stream if not already done
+        if !self.is_initialized {
+            self.initialize_stream()?;
         }
         
-        info!("Recording stopped");
+        // Clear buffer for new recording
+        self.buffer.lock().unwrap().clear();
+        
+        // Set recording flag - this makes the stream callback start buffering
+        *self.is_recording.lock().unwrap() = true;
+        
+        info!("Recording started (using pre-initialized stream)");
+        Ok(())
+    }
+    
+    /// Stop recording and save to WAV file (keeps stream running)
+    pub fn stop_recording(&mut self) -> Result<PathBuf> {
+        // Stop recording (but keep stream running)
+        *self.is_recording.lock().unwrap() = false;
+        
+        info!("Recording stopped (stream still running for next recording)");
         
         // Generate output path
         let output_path = self.generate_output_path()?;

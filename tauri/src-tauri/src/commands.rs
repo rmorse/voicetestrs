@@ -29,20 +29,18 @@ pub async fn start_recording(
         return Err("Already recording".to_string());
     }
     
+    // Use the pre-initialized recorder
     let mut recorder_lock = state.recorder.lock().await;
     
-    if recorder_lock.is_some() {
-        return Err("Already recording".to_string());
+    if let Some(recorder) = recorder_lock.as_mut() {
+        // The stream is already initialized, just start recording
+        recorder.start_recording()
+            .map_err(|e| format!("Failed to start recording: {}", e))?;
+        
+        *state.is_recording.lock().await = true;
+    } else {
+        return Err("Recorder not initialized".to_string());
     }
-
-    let mut recorder = AudioRecorder::new()
-        .map_err(|e| format!("Failed to create recorder: {}", e))?;
-    
-    recorder.start_recording()
-        .map_err(|e| format!("Failed to start recording: {}", e))?;
-    
-    *recorder_lock = Some(recorder);
-    *state.is_recording.lock().await = true;
     
     // Emit event to frontend
     app.emit("recording-status", serde_json::json!({
@@ -67,11 +65,13 @@ pub async fn stop_recording(
     
     let mut recorder_lock = state.recorder.lock().await;
     
-    let mut recorder = recorder_lock.take()
-        .ok_or_else(|| "Not recording".to_string())?;
-    
-    let audio_path = recorder.stop_recording()
-        .map_err(|e| format!("Failed to stop recording: {}", e))?;
+    // Keep the recorder alive (don't take it) - just stop recording
+    let audio_path = if let Some(recorder) = recorder_lock.as_mut() {
+        recorder.stop_recording()
+            .map_err(|e| format!("Failed to stop recording: {}", e))?
+    } else {
+        return Err("Recorder not initialized".to_string());
+    };
     
     // Emit status update
     app.emit("recording-status", serde_json::json!({
@@ -101,8 +101,26 @@ pub async fn quick_note(
     state: State<'_, AppState>,
     duration: u64,
 ) -> Result<TranscriptionResult, String> {
-    // Start recording
-    start_recording(app.clone(), state.clone()).await?;
+    // Check if already recording
+    if *state.is_recording.lock().await {
+        return Err("Already recording".to_string());
+    }
+    
+    // Start recording using the pre-initialized recorder
+    let mut recorder_lock = state.recorder.lock().await;
+    if let Some(recorder) = recorder_lock.as_mut() {
+        recorder.start_recording()
+            .map_err(|e| format!("Failed to start recording: {}", e))?;
+        *state.is_recording.lock().await = true;
+    } else {
+        return Err("Recorder not initialized".to_string());
+    }
+    drop(recorder_lock); // Release the lock before sleeping
+    
+    // Emit event to frontend
+    app.emit("recording-status", serde_json::json!({
+        "isRecording": true
+    })).map_err(|e| e.to_string())?;
     
     // Wait for the specified duration
     tokio::time::sleep(tokio::time::Duration::from_secs(duration)).await;
