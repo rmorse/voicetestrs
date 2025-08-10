@@ -3,8 +3,6 @@ mod database;
 mod api;
 mod sync;
 mod queue_manager;
-mod process_manager;
-mod port_manager;
 
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
@@ -13,8 +11,6 @@ use voicetextrs::core::transcription::Transcriber;
 use voicetextrs::core::audio::AudioRecorder;
 use queue_manager::QueueManager;
 use commands::{AppState, RecordingState};
-use process_manager::ProcessManager;
-use port_manager::PortManager;
 use tauri::{
     Manager, Emitter,
     tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
@@ -25,36 +21,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  // We'll initialize the database later in setup when we have app handle
   
-  // Initialize process manager for dev server
-  let process_manager = Arc::new(StdMutex::new(ProcessManager::new()));
-  
-  // Find available port and start Vite in development mode
-  let port = if cfg!(debug_assertions) {
-    // Clean up any stale processes first
-    PortManager::cleanup_stale_processes(5173);
-    
-    // Find an available port
-    let port_manager = PortManager::new(5173);
-    let port = tauri::async_runtime::block_on(async {
-      port_manager.find_available_port().await.unwrap_or(5173)
-    });
-    
-    // Start Vite dev server
-    println!("Starting Vite dev server on port {}", port);
-    process_manager.lock().unwrap().spawn_vite(port).expect("Failed to start Vite");
-    
-    // Wait for Vite to be ready
-    tauri::async_runtime::block_on(async {
-      tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-      process_manager.lock().unwrap().wait_for_server(30).await.expect("Vite failed to start");
-    });
-    
-    port
-  } else {
-    5173
-  };
+  // Use fixed port for development
+  let port = 5173;
   
   // Initialize the app state with pre-initialized recorder
   println!("Creating audio recorder...");
@@ -65,23 +34,16 @@ pub fn run() {
   recorder.initialize_stream().expect("Failed to initialize audio stream");
   println!("Audio stream pre-initialized successfully!");
   
+  
   let app_state = AppState {
     recorder: Arc::new(TokioMutex::new(Some(recorder))),
     transcriber: Arc::new(Transcriber::new().expect("Failed to create transcriber")),
     state: Arc::new(TokioMutex::new(RecordingState::Idle)),
   };
 
-  let mut context = tauri::generate_context!();
+  let context = tauri::generate_context!();
   
-  // Update the dev URL to use our dynamic port
-  if cfg!(debug_assertions) {
-    context.config_mut().build.dev_url = Some(format!("http://localhost:{}", port).parse().unwrap());
-  }
-  
-  let process_manager_clone = process_manager.clone();
-
   tauri::Builder::default()
-    .manage(process_manager_clone)
     .plugin(tauri_plugin_localhost::Builder::new(port).build())
     .plugin(tauri_plugin_global_shortcut::Builder::new().build())
     .manage(app_state)
@@ -202,11 +164,7 @@ pub fn run() {
       tauri::RunEvent::ExitRequested { .. } => {
         println!("Exit requested, performing cleanup...");
         
-        // Cleanup Vite process
-        if let Some(manager) = app_handle.try_state::<Arc<StdMutex<ProcessManager>>>() {
-          manager.lock().unwrap().cleanup_all();
-        }
-        
+       
         // Perform other cleanup
         let handle = app_handle.clone();
         tauri::async_runtime::block_on(async move {
@@ -218,11 +176,6 @@ pub fn run() {
       }
       tauri::RunEvent::Exit => {
         println!("App exiting, final cleanup...");
-        
-        // Final cleanup on exit
-        if let Some(manager) = app_handle.try_state::<Arc<StdMutex<ProcessManager>>>() {
-          manager.lock().unwrap().cleanup_all();
-        }
       }
       _ => {}
     });
@@ -286,10 +239,6 @@ fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
                 "quit" => {
-                    // Cleanup Vite process
-                    let manager = app.state::<Arc<StdMutex<ProcessManager>>>();
-                    manager.lock().unwrap().cleanup_all();
-                    
                     // Close the window before exiting.
                     if let Some(window) = app.get_webview_window("main") {
                         if let Err(err) = window.close() {
