@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import db, { initDatabase } from './lib/database'
 import { api } from './lib/api'
 import './App.css'
 
@@ -22,14 +21,7 @@ function App() {
       console.log('Running filesystem sync on startup...')
       setSyncStatus('Syncing filesystem...')
       
-      // Clean up any duplicate entries first
-      console.log('Cleaning up duplicate entries...')
-      try {
-        await db.cleanupDuplicates()
-        console.log('Cleanup completed')
-      } catch (err) {
-        console.error('Failed to cleanup duplicates:', err)
-      }
+      // Backend handles all database operations now
       
       try {
         // Use new SQLx-based sync
@@ -101,15 +93,11 @@ function App() {
         model: 'base.en'
       }
       
-      try {
-        await db.insertTranscription(transcription)
-        // Reload transcriptions to show the new one
-        await loadTranscriptions()
-        // Also reload database stats to update counts
-        await loadDbStats()
-      } catch (err) {
-        console.error('Failed to insert transcription:', err)
-      }
+      // Backend now handles database insertion
+      // Just reload the transcriptions to show the new one
+      await loadTranscriptions()
+      // Also reload database stats to update counts
+      await loadDbStats()
     })
 
     // Listen for state changes
@@ -124,15 +112,8 @@ function App() {
     // Listen for individual transcription sync events
     const unlistenSyncTranscription = listen('sync-transcription', async (event) => {
       const transcription = event.payload
-      
-      try {
-        // Backend only sends events for files that need syncing (orphaned, failed, pending)
-        // Completed files are NOT sent, so we can directly insert/update
-        console.log('Syncing transcription:', transcription.id, 'status:', transcription.status)
-        await db.insertTranscription(transcription)
-      } catch (err) {
-        console.error('Failed to sync transcription:', err)
-      }
+      console.log('Syncing transcription:', transcription.id, 'status:', transcription.status)
+      // Backend handles all database operations now
     })
     
     // Listen for sync completion
@@ -165,30 +146,13 @@ function App() {
   const loadTranscriptions = async () => {
     try {
       console.log('Loading transcriptions from database...')
-      
-      // MIGRATION: Comment out old code and use new API
-      const USE_NEW_API = true // Toggle this to switch between old/new implementation
-      
-      if (USE_NEW_API) {
-        // New SQLx-based API
-        const data = await api.getTranscriptions({ 
-          limit: 50, 
-          offset: 0,
-          status: null
-        })
-        console.log('Loaded transcriptions from new API:', data)
-        setTranscriptions(data)
-      } else {
-        // Old frontend database
-        const data = await db.getTranscriptions({ 
-          status: null, 
-          limit: 50, 
-          offset: 0,
-          orderBy: 'datetime(created_at) DESC'  // Ensure proper datetime ordering
-        })
-        console.log('Loaded transcriptions ordered by date:', data)
-        setTranscriptions(data)
-      }
+      const data = await api.getTranscriptions({ 
+        limit: 50, 
+        offset: 0,
+        status: null
+      })
+      console.log('Loaded transcriptions:', data)
+      setTranscriptions(data)
     } catch (err) {
       console.error('Failed to load transcriptions:', err)
     }
