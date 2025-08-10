@@ -33,7 +33,7 @@ impl Transcriber {
         info!("Found whisper binary at: {:?}", whisper_path);
         
         // Default to base.en model
-        let model_type = "base.en".to_string();
+        let model_type = "medium.en".to_string();
         
         // Try to find the model in the same relative location as whisper
         let whisper_dir = whisper_path.parent()

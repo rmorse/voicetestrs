@@ -23,7 +23,12 @@
       "Bash(npx tauri:*)",
       "Bash(npm run tauri:*)",
       "Bash(cargo check:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(whisper\\Release\\main.exe:*)",
+      "Bash(.\\whisper\\Release\\main.exe:*)",
+      "Bash(./whisper-cli.exe:*)",
+      "Bash(./main.exe --help)",
+      "Bash(./download-model.bat)"
     ],
     "deny": []
   }
