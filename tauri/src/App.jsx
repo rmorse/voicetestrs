@@ -32,7 +32,8 @@ function App() {
       }
       
       try {
-        const result = await invoke('sync_filesystem')
+        // Use new SQLx-based sync
+        const result = await api.syncFilesystem()
         console.log('Sync completed:', result)
         // After sync, load transcriptions from database
         await loadTranscriptions()
@@ -166,7 +167,7 @@ function App() {
       console.log('Loading transcriptions from database...')
       
       // MIGRATION: Comment out old code and use new API
-      const USE_NEW_API = false // Toggle this to switch between old/new implementation
+      const USE_NEW_API = true // Toggle this to switch between old/new implementation
       
       if (USE_NEW_API) {
         // New SQLx-based API
@@ -195,7 +196,8 @@ function App() {
   
   const loadDbStats = async () => {
     try {
-      const stats = await db.getDatabaseStats()
+      // Use new API for database stats
+      const stats = await api.getDatabaseStats()
       setDbStats(stats)
     } catch (err) {
       console.error('Failed to load database stats:', err)

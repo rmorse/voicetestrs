@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{AppHandle, State, Emitter};
+use tauri::{AppHandle, State, Emitter, Manager};
 use serde::{Deserialize, Serialize};
+use crate::database::{Database, models::Transcription};
 
 // Import our existing modules from the main project
 use voicetextrs::core::audio::AudioRecorder;
@@ -115,11 +116,61 @@ pub async fn stop_recording(
     use voicetextrs::core::sync::FileSystemSync;
     let timestamp = FileSystemSync::extract_file_timestamp(&audio_path);
     
+    // Create text file path
+    let text_path = audio_path.with_extension("txt");
+    
+    // Save transcription text to file
+    if let Err(e) = std::fs::write(&text_path, &transcription.text) {
+        eprintln!("Failed to save transcription text: {}", e);
+    }
+    
     let result = TranscriptionResult {
         text: transcription.text.clone(),
         audio_path: audio_path.to_string_lossy().to_string(),
         created_at: timestamp.to_rfc3339(),  // Convert to ISO string
     };
+    
+    // Insert transcription into database
+    let db = app.state::<Arc<Database>>();
+    
+    // Extract ID from filename
+    let file_name = audio_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+    
+    let id = if file_name.len() >= 15 {
+        file_name[..15].replace("-", "")
+    } else {
+        file_name.to_string()
+    };
+    
+    // Get file metadata
+    let file_size_bytes = std::fs::metadata(&audio_path)
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+    
+    let db_transcription = Transcription {
+        id,
+        audio_path: audio_path.to_string_lossy().to_string(),
+        text_path: Some(text_path.to_string_lossy().to_string()),
+        transcription_text: Some(transcription.text.clone()),
+        created_at: timestamp.with_timezone(&chrono::Utc),
+        transcribed_at: Some(chrono::Utc::now()),
+        duration_seconds: transcription.duration as f64,
+        file_size_bytes,
+        language: transcription.language.clone(),
+        model: "base.en".to_string(),
+        status: "complete".to_string(),
+        source: "recording".to_string(),
+        error_message: None,
+        metadata: None,
+        session_id: None,
+    };
+    
+    if let Err(e) = db.insert_transcription(&db_transcription).await {
+        eprintln!("Failed to insert transcription into database: {}", e);
+        // Don't fail the whole operation if DB insert fails
+    }
     
     // Set state back to Idle after successful transcription
     *state.state.lock().await = RecordingState::Idle;

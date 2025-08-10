@@ -21,13 +21,7 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  // Initialize database
-  let database_fut = async {
-    database::Database::new("sqlite:voicetextrs.db").await
-  };
-  
-  let database = tauri::async_runtime::block_on(database_fut)
-    .expect("Failed to initialize database");
+  // We'll initialize the database later in setup when we have app handle
   
   // Find an unused port
   let port = portpicker::pick_unused_port().expect("failed to find unused port");
@@ -118,7 +112,6 @@ pub fn run() {
         .build(),
     )
     .manage(app_state)
-    .manage(database)
     .invoke_handler(tauri::generate_handler![
       commands::start_recording,
       commands::stop_recording,
@@ -153,6 +146,28 @@ pub fn run() {
             .build(),
         )?;
       }
+      
+      // Initialize database with proper path
+      let app_handle = app.handle().clone();
+      let database_path = app_handle.path()
+        .app_data_dir()
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
+        .join("voicetextrs.db");
+      
+      // Ensure the directory exists
+      if let Some(parent) = database_path.parent() {
+        std::fs::create_dir_all(parent)?;
+      }
+      
+      let database_url = format!("sqlite:{}", database_path.to_string_lossy());
+      println!("Database path: {}", database_url);
+      
+      let database = tauri::async_runtime::block_on(async {
+        database::Database::new(&database_url).await
+      })?;
+      
+      // Add database to managed state
+      app.manage(database);
       
       // Set up system tray
       setup_system_tray(app)?;

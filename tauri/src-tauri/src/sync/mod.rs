@@ -238,17 +238,21 @@ pub async fn sync_filesystem_sqlx(
     db: tauri::State<'_, Arc<Database>>,
     app: AppHandle,
 ) -> Result<SyncReport, String> {
-    // Get the notes directory from app data dir
-    let app_dir = app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    // For now, use the project's notes directory
+    // TODO: Later migrate to app data dir
+    let notes_dir = std::path::PathBuf::from("D:\\projects\\claude\\voicetextrs\\notes");
     
-    let notes_dir = app_dir.join("notes");
+    println!("Starting SQLx filesystem sync from: {:?}", notes_dir);
     
     // Create sync instance and run sync
     let sync = FileSystemSync::new(db.inner().clone(), notes_dir);
     let report = sync.sync_filesystem().await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            eprintln!("Sync failed: {}", e);
+            e.to_string()
+        })?;
+    
+    println!("SQLx sync completed: {:?}", report);
     
     // Emit update event
     app.emit("sync-complete", &report)
