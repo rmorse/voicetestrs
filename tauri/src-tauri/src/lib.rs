@@ -4,7 +4,6 @@ mod api;
 mod sync;
 
 use std::sync::Arc;
-use std::process::Command;
 use tokio::sync::Mutex;
 use voicetextrs::core::transcription::Transcriber;
 use voicetextrs::core::audio::AudioRecorder;
@@ -21,77 +20,23 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 pub fn run() {
   // We'll initialize the database later in setup when we have app handle
   
-  // Find an unused port
-  let port = portpicker::pick_unused_port().expect("failed to find unused port");
-  println!("Using port: {}", port);
-  
-  // Start Vite dev server with the selected port
-  if cfg!(debug_assertions) {
-    std::env::set_var("VITE_PORT", port.to_string());
-    
-    // Start Vite in the background
-    std::thread::spawn(move || {
-      // On Windows, we need to use cmd to run npm
-      let output = if cfg!(windows) {
-        Command::new("cmd")
-          .args(&["/C", "npm", "run", "dev"])
-          .env("VITE_PORT", port.to_string())
-          .current_dir("../")  // Go up to tauri directory
-          .spawn()
-      } else {
-        Command::new("npm")
-          .args(&["run", "dev"])
-          .env("VITE_PORT", port.to_string())
-          .current_dir("../")
-          .spawn()
-      };
-      
-      match output {
-        Ok(mut child) => {
-          println!("Vite dev server started on port {}", port);
-          // Keep the process running
-          let _ = child.wait();
-        }
-        Err(e) => {
-          eprintln!("Failed to start Vite dev server: {}", e);
-        }
-      }
-    });
-    
-    // Wait for Vite to be ready by polling the server
-    println!("Waiting for Vite dev server to be ready...");
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(60); // Increase timeout to 60 seconds
-    
-    loop {
-      // Check if we've exceeded the timeout
-      if start_time.elapsed() > timeout {
-        eprintln!("WARNING: Vite server didn't respond after 60 seconds, proceeding anyway");
-        break;
-      }
-      
-      // Try to connect to the Vite server
-      match std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
-        Ok(_) => {
-          println!("Vite dev server is ready on port {} (took {:.2}s)", 
-                   port, start_time.elapsed().as_secs_f64());
-          // Give it a tiny bit more time to fully initialize
-          std::thread::sleep(std::time::Duration::from_millis(500));
-          break;
-        }
-        Err(_) => {
-          // Server not ready yet, wait a bit before retrying
-          std::thread::sleep(std::time::Duration::from_millis(500));
-          
-          // Print progress every 5 seconds
-          let elapsed = start_time.elapsed().as_secs();
-          if elapsed > 0 && elapsed % 5 == 0 {
-            println!("Still waiting for Vite... ({}s elapsed)", elapsed);
-          }
-        }
-      }
+  // Read the port from the file written by start-dev-server.js
+  let port = if cfg!(debug_assertions) {
+    let port_file = std::path::Path::new("../.current-port");
+    if port_file.exists() {
+      let port_str = std::fs::read_to_string(port_file)
+        .expect("Failed to read port file");
+      port_str.trim().parse::<u16>()
+        .expect("Invalid port in file")
+    } else {
+      // Fallback to default if file doesn't exist
+      5173
     }
-  }
+  } else {
+    5173
+  };
+  
+  println!("Using port: {}", port);
   
   // Initialize the app state with pre-initialized recorder
   println!("Creating audio recorder...");
@@ -206,8 +151,23 @@ pub fn run() {
         api.prevent_close();
       }
     })
-    .run(context)
-    .expect("error while running tauri application");
+    .build(context)
+    .expect("error while building tauri application")
+    .run(|app_handle, event| match event {
+      tauri::RunEvent::ExitRequested { .. } => {
+        println!("Exit requested, performing cleanup...");
+        
+        // Perform cleanup
+        let handle = app_handle.clone();
+        tauri::async_runtime::block_on(async move {
+          cleanup_processes(&handle).await;
+        });
+        
+        // Allow the app to exit
+        println!("Cleanup done, exiting...");
+      }
+      _ => {}
+    });
 }
 
 fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -268,7 +228,12 @@ fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
                 "quit" => {
-                    app.exit(0);
+                    // Perform cleanup before exiting
+                    let app_handle = app.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        cleanup_processes(&app_handle).await;
+                        app_handle.exit(0);
+                    });
                 }
                 _ => {}
             }
@@ -490,4 +455,11 @@ async fn quick_note_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error:
     
     println!("Quick note started - will stop in 10 seconds");
     Ok(())
+}
+
+// Cleanup helper function
+async fn cleanup_processes(_app: &AppHandle) {
+    println!("Cleaning up...");
+    // Vite is now managed by the beforeDevCommand, not by us
+    println!("Cleanup complete");
 }

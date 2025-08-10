@@ -22,17 +22,18 @@ function App() {
       setSyncStatus('Syncing filesystem...')
       
       // Add timeout to prevent infinite hang
-      const timeoutPromise = new Promise((_, reject) => 
+     /*  const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Sync timeout after 10s')), 10000)
-      )
+      ) */
       
       // Backend handles all database operations now
       
       try {
         // Use new SQLx-based sync with timeout
-        const syncPromise = api.syncFilesystem()
+        /* const syncPromise = api.syncFilesystem()
         const result = await Promise.race([syncPromise, timeoutPromise])
-        console.log('Sync completed:', result)
+        console.log('Sync completed:', result) */
+        const result = await api.syncFilesystem()
         // After sync, load transcriptions from database
         await loadTranscriptions()
       } catch (err) {
