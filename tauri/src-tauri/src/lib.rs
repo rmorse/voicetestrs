@@ -121,6 +121,7 @@ pub fn run() {
       db_commands::db_enqueue_task,
       db_commands::db_retry_task,
       db_commands::db_clear_completed_tasks,
+      db_commands::sync_filesystem,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {
@@ -136,6 +137,20 @@ pub fn run() {
       
       // Set up global hotkeys
       setup_global_hotkeys(app)?;
+      
+      // Trigger filesystem sync on startup
+      let app_handle = app.handle().clone();
+      tauri::async_runtime::spawn(async move {
+        // Wait a bit for the frontend to be ready
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        
+        // Emit event to trigger sync
+        if let Err(e) = app_handle.emit("start-filesystem-sync", ()) {
+          eprintln!("Failed to emit sync event: {}", e);
+        }
+        // Log the sync start
+        println!("Starting filesystem sync on startup");    
+      });
       
       // Check for --background flag
       let args: Vec<String> = std::env::args().collect();

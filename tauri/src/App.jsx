@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import db from './lib/database'
 import './App.css'
 
 function App() {
@@ -8,21 +9,61 @@ function App() {
   const [transcriptions, setTranscriptions] = useState([])
   const [recordingDuration, setRecordingDuration] = useState(0)
   const [error, setError] = useState(null)
+  const [syncStatus, setSyncStatus] = useState(null) // Track sync status
+  const [dbStats, setDbStats] = useState(null) // Database statistics
 
   useEffect(() => {
+    console.log('App mounted, setting up event listeners...')
+    
+    // Run filesystem sync on startup
+    const runStartupSync = async () => {
+      console.log('Running filesystem sync on startup...')
+      setSyncStatus('Syncing filesystem...')
+      try {
+        const result = await invoke('sync_filesystem')
+        console.log('Sync completed:', result)
+        // After sync, load transcriptions from database
+        await loadTranscriptions()
+      } catch (err) {
+        console.error('Startup sync failed:', err)
+        setSyncStatus(`Sync failed: ${err}`)
+        // Even if sync fails, try to load existing transcriptions
+        await loadTranscriptions()
+      }
+    }
+    
+    // Run the sync
+    runStartupSync()
+    
     // Check initial state on mount
     invoke('get_recording_status').then(state => {
       setAppState(state)
     }).catch(console.error)
 
     // Listen for transcription events from backend
-    const unlisten = listen('transcription-complete', (event) => {
-      setTranscriptions(prev => [{
-        id: Date.now(),
-        text: event.payload.text,
-        timestamp: new Date().toLocaleString(),
-        audioPath: event.payload.audioPath
-      }, ...prev])
+    const unlisten = listen('transcription-complete', async (event) => {
+      // Insert new transcription into database
+      const transcription = {
+        id: `${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`,
+        audio_path: event.payload.audioPath,
+        text_path: event.payload.textPath,
+        transcription_text: event.payload.text,
+        created_at: new Date().toISOString(),
+        status: 'complete',
+        source: 'recording',
+        duration_seconds: 0,
+        file_size_bytes: 0,
+        language: 'en',
+        model: 'base.en'
+      }
+      
+      try {
+        await db.insertTranscription(transcription)
+        // Reload transcriptions to show the new one
+        loadTranscriptions()
+      } catch (err) {
+        console.error('Failed to insert transcription:', err)
+      }
     })
 
     // Listen for state changes
@@ -33,14 +74,79 @@ function App() {
         setRecordingDuration(0)
       }
     })
-
-    // No need for separate started/stopped events anymore - state-changed handles it
+    
+    // Listen for individual transcription sync events
+    const unlistenSyncTranscription = listen('sync-transcription', async (event) => {
+      const transcription = event.payload
+      console.log('Received sync-transcription event:', transcription)
+      try {
+        // Check if transcription already exists
+        const existing = await db.getTranscription(transcription.id)
+        console.log('Existing transcription check:', existing)
+        if (!existing) {
+          console.log('Inserting new transcription:', transcription)
+          try {
+            const insertResult = await db.insertTranscription(transcription)
+            console.log('Insert result:', insertResult)
+            console.log('Successfully synced transcription:', transcription.id)
+          } catch (insertErr) {
+            console.error('Failed to insert transcription:', insertErr)
+          }
+        } else {
+          console.log('Transcription already exists:', transcription.id)
+        }
+      } catch (err) {
+        console.error('Failed to sync transcription:', err)
+      }
+    })
+    
+    // Listen for sync completion
+    const unlistenSyncComplete = listen('sync-complete', async (event) => {
+      const report = event.payload
+      console.log('Sync complete event received:', report)
+      setSyncStatus(`Sync complete: ${report.completed_transcriptions} transcriptions, ${report.orphaned_audio} orphaned files`)
+      
+      // Wait a bit for all inserts to complete
+      setTimeout(async () => {
+        console.log('Loading transcriptions after sync complete...')
+        // Reload transcriptions after sync
+        await loadTranscriptions()
+        // Load database stats
+        await loadDbStats()
+      }, 500)
+      
+      // Clear sync status after a few seconds
+      setTimeout(() => setSyncStatus(null), 5000)
+    })
 
     return () => {
       unlisten.then(fn => fn())
       unlistenStatus.then(fn => fn())
+      unlistenSyncTranscription.then(fn => fn())
+      unlistenSyncComplete.then(fn => fn())
     }
   }, [])
+  
+  const loadTranscriptions = async () => {
+    try {
+      console.log('Loading transcriptions from database...')
+      // Don't filter by status to see all transcriptions
+      const data = await db.getTranscriptions({ status: null, limit: 50, offset: 0 })
+      console.log('Loaded transcriptions:', data)
+      setTranscriptions(data)
+    } catch (err) {
+      console.error('Failed to load transcriptions:', err)
+    }
+  }
+  
+  const loadDbStats = async () => {
+    try {
+      const stats = await db.getDatabaseStats()
+      setDbStats(stats)
+    } catch (err) {
+      console.error('Failed to load database stats:', err)
+    }
+  }
 
   useEffect(() => {
     let interval
@@ -146,11 +252,14 @@ function App() {
         <div className="transcriptions-section">
           <div className="section-header">
             <h2>Transcriptions</h2>
-            {transcriptions.length > 0 && (
-              <button className="clear-button" onClick={clearTranscriptions}>
-                Clear All
-              </button>
-            )}
+            <div className="header-info">
+              {syncStatus && <span className="sync-status">{syncStatus}</span>}
+              {dbStats && (
+                <span className="db-stats">
+                  {dbStats.total_transcriptions} total, {dbStats.completed} completed
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="transcriptions-list">
@@ -163,9 +272,16 @@ function App() {
               transcriptions.map(item => (
                 <div key={item.id} className="transcription-item">
                   <div className="transcription-header">
-                    <span className="timestamp">{item.timestamp}</span>
+                    <span className="timestamp">
+                      {item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown'}
+                    </span>
+                    <span className="status-badge {item.status}">
+                      {item.status || 'complete'}
+                    </span>
                   </div>
-                  <div className="transcription-text">{item.text}</div>
+                  <div className="transcription-text">
+                    {item.transcription_text || item.text || 'No transcription available'}
+                  </div>
                   <div className="transcription-footer">
                     <span className="audio-path">{item.audioPath}</span>
                   </div>

@@ -6,7 +6,18 @@ let db = null;
 // Initialize database connection
 export async function initDatabase() {
   if (!db) {
-    db = await Database.load('sqlite:voicetextrs.db');
+    console.log('Initializing database connection...');
+    try {
+      db = await Database.load('sqlite:voicetextrs.db');
+      console.log('Database connected successfully');
+      
+      // Check if tables exist
+      const tables = await db.select("SELECT name FROM sqlite_master WHERE type='table'");
+      console.log('Database tables:', tables);
+    } catch (err) {
+      console.error('Failed to initialize database:', err);
+      throw err;
+    }
   }
   return db;
 }

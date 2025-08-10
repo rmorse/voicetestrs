@@ -188,6 +188,28 @@
   margin-bottom: 1.5rem;
 }
 
+.header-info {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.sync-status {
+  color: #64b5f6;
+  animation: pulse 1s infinite;
+}
+
+.db-stats {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
 .section-header h2 {
   margin: 0;
 }
@@ -243,11 +265,37 @@
 
 .transcription-header {
   margin-bottom: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .timestamp {
   font-size: 0.9rem;
   opacity: 0.7;
+}
+
+.status-badge {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  text-transform: uppercase;
+}
+
+.status-badge.complete {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81c784;
+}
+
+.status-badge.orphaned {
+  background: rgba(255, 152, 0, 0.2);
+  color: #ffb74d;
+}
+
+.status-badge.processing {
+  background: rgba(33, 150, 243, 0.2);
+  color: #64b5f6;
 }
 
 .transcription-text {
