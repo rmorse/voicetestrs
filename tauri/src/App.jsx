@@ -248,9 +248,9 @@ function App() {
       // Clear the UI
       setTranscriptions([])
       
-      // Trigger filesystem sync to repopulate
-      console.log('Triggering filesystem sync...')
-      const result = await invoke('sync_filesystem')
+      // Trigger FORCED filesystem sync to repopulate (includes all files)
+      console.log('Triggering forced filesystem sync...')
+      const result = await invoke('sync_filesystem_force')
       console.log('Resync completed:', result)
       
       // Reload transcriptions

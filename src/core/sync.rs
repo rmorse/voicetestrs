@@ -100,7 +100,8 @@ impl FileSystemSync {
         let id = Self::extract_id_from_path(&relative_path);
         
         let text_path = audio_path.with_extension("txt");
-        let json_path = audio_path.with_extension("json");
+        // Whisper creates .wav.json files, not .json files
+        let json_path = PathBuf::from(format!("{}.json", audio_path.display()));
         
         let mut transcription = Transcription::new_orphan(relative_path.clone());
         transcription.id = id;
@@ -122,6 +123,7 @@ impl FileSystemSync {
             }
         }
         
+        // Check for transcription text file
         if text_path.exists() {
             let text_relative = text_path
                 .strip_prefix(&self.notes_dir)
@@ -137,7 +139,26 @@ impl FileSystemSync {
                 transcription.source = TranscriptionSource::Recording;
                 transcription.transcribed_at = Some(Local::now());
             }
+        } else if json_path.exists() {
+            // No text file, but check if JSON indicates it was processed (e.g., BLANK_AUDIO)
+            if let Ok(json_content) = fs::read_to_string(&json_path) {
+                if json_content.contains("[BLANK_AUDIO]") {
+                    // This audio was transcribed but had no speech
+                    transcription.transcription_text = Some("[BLANK_AUDIO]".to_string());
+                    transcription.status = TranscriptionStatus::Complete;
+                    transcription.source = TranscriptionSource::Recording;
+                    transcription.transcribed_at = Some(Local::now());
+                } else {
+                    // Has JSON but not processed yet
+                    transcription.status = TranscriptionStatus::Orphaned;
+                    transcription.source = TranscriptionSource::Orphan;
+                }
+            } else {
+                transcription.status = TranscriptionStatus::Orphaned;
+                transcription.source = TranscriptionSource::Orphan;
+            }
         } else {
+            // No text file and no JSON file - truly orphaned
             transcription.status = TranscriptionStatus::Orphaned;
             transcription.source = TranscriptionSource::Orphan;
         }
@@ -256,7 +277,8 @@ impl FileSystemSync {
         let id = Self::extract_id_from_path(&relative_path);
         
         let text_path = audio_path.with_extension("txt");
-        let json_path = audio_path.with_extension("json");
+        // Whisper creates .wav.json files, not .json files
+        let json_path = PathBuf::from(format!("{}.json", audio_path.display()));
         
         let mut transcription = Transcription::new_orphan(relative_path.clone());
         transcription.id = id;
@@ -278,6 +300,7 @@ impl FileSystemSync {
             }
         }
         
+        // Check for transcription text file
         if text_path.exists() {
             let text_relative = text_path
                 .strip_prefix(&self.notes_dir)
@@ -293,7 +316,26 @@ impl FileSystemSync {
                 transcription.source = TranscriptionSource::Recording;
                 transcription.transcribed_at = Some(Local::now());
             }
+        } else if json_path.exists() {
+            // No text file, but check if JSON indicates it was processed (e.g., BLANK_AUDIO)
+            if let Ok(json_content) = fs::read_to_string(&json_path) {
+                if json_content.contains("[BLANK_AUDIO]") {
+                    // This audio was transcribed but had no speech
+                    transcription.transcription_text = Some("[BLANK_AUDIO]".to_string());
+                    transcription.status = TranscriptionStatus::Complete;
+                    transcription.source = TranscriptionSource::Recording;
+                    transcription.transcribed_at = Some(Local::now());
+                } else {
+                    // Has JSON but not processed yet
+                    transcription.status = TranscriptionStatus::Orphaned;
+                    transcription.source = TranscriptionSource::Orphan;
+                }
+            } else {
+                transcription.status = TranscriptionStatus::Orphaned;
+                transcription.source = TranscriptionSource::Orphan;
+            }
         } else {
+            // No text file and no JSON file - truly orphaned
             transcription.status = TranscriptionStatus::Orphaned;
             transcription.source = TranscriptionSource::Orphan;
         }

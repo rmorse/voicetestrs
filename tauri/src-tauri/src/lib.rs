@@ -122,6 +122,7 @@ pub fn run() {
       db_commands::db_retry_task,
       db_commands::db_clear_completed_tasks,
       db_commands::sync_filesystem,
+      db_commands::sync_filesystem_force,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {

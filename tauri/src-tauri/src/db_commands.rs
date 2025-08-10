@@ -101,6 +101,20 @@ pub async fn db_clear_completed_tasks(
 pub async fn sync_filesystem(
     app: AppHandle,
 ) -> Result<SyncReport, String> {
+    sync_filesystem_internal(app, false).await
+}
+
+#[tauri::command]
+pub async fn sync_filesystem_force(
+    app: AppHandle,
+) -> Result<SyncReport, String> {
+    sync_filesystem_internal(app, true).await
+}
+
+async fn sync_filesystem_internal(
+    app: AppHandle,
+    force_all: bool,
+) -> Result<SyncReport, String> {
     // The notes directory is at the project root
     // In development, it's at D:\projects\claude\voicetextrs\notes
     // We need to go up from the tauri src directory
@@ -134,15 +148,20 @@ pub async fn sync_filesystem(
             // Only emit sync events for files that need syncing:
             // 1. Orphaned files (no transcription text)
             // 2. Failed or pending files
-            // Skip completed transcriptions - frontend already has them
+            // 3. ALL files if force_all is true (for full resync)
+            // Skip completed transcriptions unless forced
             use voicetextrs::core::database::TranscriptionStatus;
             
-            let needs_sync = match &transcription.status {
-                TranscriptionStatus::Orphaned => true,  // Always sync orphaned files
-                TranscriptionStatus::Failed => true,    // Always sync failed files
-                TranscriptionStatus::Pending => true,   // Always sync pending files
-                TranscriptionStatus::Processing => true, // Always sync processing files
-                TranscriptionStatus::Complete => false,  // SKIP completed - already in DB!
+            let needs_sync = if force_all {
+                true  // Force sync everything for full resync
+            } else {
+                match &transcription.status {
+                    TranscriptionStatus::Orphaned => true,  // Always sync orphaned files
+                    TranscriptionStatus::Failed => true,    // Always sync failed files
+                    TranscriptionStatus::Pending => true,   // Always sync pending files
+                    TranscriptionStatus::Processing => true, // Always sync processing files
+                    TranscriptionStatus::Complete => false,  // SKIP completed - already in DB!
+                }
             };
             
             if needs_sync {
