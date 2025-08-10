@@ -229,7 +229,7 @@ fn setup_global_hotkeys(app: &tauri::App) -> Result<(), Box<dyn std::error::Erro
     
     // Register Ctrl+Shift+R for recording toggle
     let record_shortcut = Shortcut::new(Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT), tauri_plugin_global_shortcut::Code::KeyR);
-    shortcuts.on_shortcut(record_shortcut, move |app_handle, _shortcut, event| {
+    match shortcuts.on_shortcut(record_shortcut.clone(), move |app_handle, _shortcut, event| {
         if event.state == ShortcutState::Pressed {
             println!("Recording hotkey pressed");
             let handle = app_handle.clone();
@@ -237,11 +237,14 @@ fn setup_global_hotkeys(app: &tauri::App) -> Result<(), Box<dyn std::error::Erro
                 toggle_recording(&handle).await;
             });
         }
-    })?;
+    }) {
+        Ok(_) => println!("Registered Ctrl+Shift+R"),
+        Err(e) => eprintln!("Warning: Could not register Ctrl+Shift+R: {}", e),
+    }
     
     // Register Ctrl+Shift+N for quick note
     let note_shortcut = Shortcut::new(Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT), tauri_plugin_global_shortcut::Code::KeyN);
-    shortcuts.on_shortcut(note_shortcut, move |app_handle, _shortcut, event| {
+    match shortcuts.on_shortcut(note_shortcut.clone(), move |app_handle, _shortcut, event| {
         if event.state == ShortcutState::Pressed {
             println!("Quick note hotkey pressed");
             let handle = app_handle.clone();
@@ -251,18 +254,24 @@ fn setup_global_hotkeys(app: &tauri::App) -> Result<(), Box<dyn std::error::Erro
                 }
             });
         }
-    })?;
+    }) {
+        Ok(_) => println!("Registered Ctrl+Shift+N"),
+        Err(e) => eprintln!("Warning: Could not register Ctrl+Shift+N: {}", e),
+    }
     
     // Register Ctrl+Shift+V for show/hide window
     let window_shortcut = Shortcut::new(Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT), tauri_plugin_global_shortcut::Code::KeyV);
-    shortcuts.on_shortcut(window_shortcut, move |app_handle, _shortcut, event| {
+    match shortcuts.on_shortcut(window_shortcut.clone(), move |app_handle, _shortcut, event| {
         if event.state == ShortcutState::Pressed {
             println!("Show/hide window hotkey pressed");
             toggle_window_visibility(&app_handle);
         }
-    })?;
+    }) {
+        Ok(_) => println!("Registered Ctrl+Shift+V"),
+        Err(e) => eprintln!("Warning: Could not register Ctrl+Shift+V: {}", e),
+    }
     
-    println!("Global hotkeys registered successfully");
+    println!("Global hotkeys setup complete");
     Ok(())
 }
 

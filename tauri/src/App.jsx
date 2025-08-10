@@ -10,6 +10,11 @@ function App() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
+    // Check initial recording status on mount
+    invoke('get_recording_status').then(status => {
+      setIsRecording(status)
+    }).catch(console.error)
+
     // Listen for transcription events from backend
     const unlisten = listen('transcription-complete', (event) => {
       setTranscriptions(prev => [{
@@ -22,6 +27,7 @@ function App() {
 
     // Listen for recording status changes
     const unlistenStatus = listen('recording-status', (event) => {
+      console.log('Recording status event:', event.payload)
       setIsRecording(event.payload.isRecording)
       if (!event.payload.isRecording) {
         setRecordingDuration(0)
@@ -30,12 +36,14 @@ function App() {
 
     // Listen for recording started event (from tray/hotkeys)
     const unlistenStarted = listen('recording-started', () => {
+      console.log('Recording started event received')
       setIsRecording(true)
       setRecordingDuration(0)
     })
 
     // Listen for recording stopped event (from tray/hotkeys)
     const unlistenStopped = listen('recording-stopped', (event) => {
+      console.log('Recording stopped event received')
       setIsRecording(false)
       setRecordingDuration(0)
       // Add the transcription to the list
@@ -69,12 +77,29 @@ function App() {
     try {
       setError(null)
       if (isRecording) {
-        await invoke('stop_recording')
+        const result = await invoke('stop_recording')
+        // The stop_recording command returns the transcription result
+        // Update the UI state
+        setIsRecording(false)
+        setRecordingDuration(0)
+        if (result) {
+          setTranscriptions(prev => [{
+            id: Date.now(),
+            text: result.text,
+            timestamp: new Date().toLocaleString(),
+            audioPath: result.audio_path
+          }, ...prev])
+        }
       } else {
         await invoke('start_recording')
+        setIsRecording(true)
+        setRecordingDuration(0)
       }
     } catch (err) {
       setError(err.toString())
+      // Reset recording state on error
+      setIsRecording(false)
+      setRecordingDuration(0)
     }
   }
 
