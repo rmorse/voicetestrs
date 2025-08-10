@@ -228,12 +228,13 @@ fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
                     }
                 }
                 "quit" => {
-                    // Perform cleanup before exiting
-                    let app_handle = app.app_handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        cleanup_processes(&app_handle).await;
-                        app_handle.exit(0);
-                    });
+                    // Close the window before exiting.
+                    if let Some(window) = app.get_webview_window("main") {
+                        if let Err(err) = window.close() {
+                            eprintln!("Failed to close window before exiting: {}", err);
+                        }
+                    }
+                    app.app_handle().exit(0);
                 }
                 _ => {}
             }
@@ -458,8 +459,16 @@ async fn quick_note_from_tray(app: &AppHandle) -> Result<(), Box<dyn std::error:
 }
 
 // Cleanup helper function
-async fn cleanup_processes(_app: &AppHandle) {
+async fn cleanup_processes(app: &AppHandle) {
     println!("Cleaning up...");
-    // Vite is now managed by the beforeDevCommand, not by us
+    
+    // Based on GitHub issue #7606 - just close, don't destroy
+    if let Some(window) = app.get_webview_window("main") {
+        println!("Closing main window...");
+        if let Err(e) = window.destroy() {
+            eprintln!("Error closing main window: {}", e);
+        }
+    }
+    
     println!("Cleanup complete");
 }
