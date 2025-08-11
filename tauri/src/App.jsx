@@ -31,18 +31,15 @@ function App() {
       // Backend handles all database operations now
       
       try {
-        // Use new SQLx-based sync with timeout
-        /* const syncPromise = api.syncFilesystem()
-        const result = await Promise.race([syncPromise, timeoutPromise])
-        console.log('Sync completed:', result) */
-        const result = await api.syncFilesystem()
-        // After sync, load transcriptions from database
+        // Don't perform full sync on startup - let background processes handle it
+        // This improves startup performance significantly
+        // const result = await api.syncFilesystem()
+        
+        // Just load existing transcriptions from database
         await loadTranscriptions()
       } catch (err) {
-        console.error('Startup sync failed:', err)
-        setSyncStatus(`Sync failed: ${err}`)
-        // Even if sync fails, try to load existing transcriptions
-        await loadTranscriptions()
+        console.error('Failed to load transcriptions:', err)
+        setSyncStatus(`Load failed: ${err}`)
       } finally {
         // Clear sync status after a moment
         setTimeout(() => setSyncStatus(null), 3000)

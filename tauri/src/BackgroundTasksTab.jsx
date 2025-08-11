@@ -15,8 +15,15 @@ function BackgroundTasksTab() {
     loadTasks();
     
     // Listen for task updates
-    const unlisten = listen('background-task-update', (event) => {
+    const unlistenTask = listen('background-task-update', (event) => {
       console.log('Task update:', event.payload);
+      loadQueueStatus();
+      loadTasks();
+    });
+    
+    // Listen for import events
+    const unlistenImport = listen('import-queued', (event) => {
+      console.log('Import queued:', event.payload);
       loadQueueStatus();
       loadTasks();
     });
@@ -30,7 +37,8 @@ function BackgroundTasksTab() {
     }, 5000);
     
     return () => {
-      unlisten.then(fn => fn());
+      unlistenTask.then(fn => fn());
+      unlistenImport.then(fn => fn());
       clearInterval(interval);
     };
   }, [isPaused]);
@@ -105,10 +113,17 @@ function BackgroundTasksTab() {
     if (taskType.TranscribeOrphan) {
       const path = taskType.TranscribeOrphan.audio_path;
       const filename = path.split(/[/\\]/).pop();
-      return `Transcribe: ${filename}`;
+      return `📝 Transcribe: ${filename}`;
     }
     if (taskType.TranscribeImported) {
-      return `Import: ${taskType.TranscribeImported.original_name}`;
+      return `📥 Import: ${taskType.TranscribeImported.original_name}`;
+    }
+    if (taskType.FileSystemSync) {
+      return `🔄 Filesystem Sync ${taskType.FileSystemSync.full_scan ? '(Full)' : '(Incremental)'}`;
+    }
+    if (taskType.ProcessImport) {
+      const filename = taskType.ProcessImport.import_path.split(/[/\\]/).pop();
+      return `📦 Process Import: ${filename}`;
     }
     return 'Unknown Task';
   };

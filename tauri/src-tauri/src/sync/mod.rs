@@ -1,3 +1,6 @@
+pub mod imports;
+pub mod file_watcher;
+
 use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -31,7 +34,7 @@ impl FileSystemSync {
         self
     }
     
-    pub async fn sync_filesystem(&self) -> Result<SyncReport, Box<dyn std::error::Error>> {
+    pub async fn sync_filesystem(&self) -> Result<SyncReport, Box<dyn std::error::Error + Send + Sync>> {
         let mut report = SyncReport::default();
         
         // Get existing IDs from database

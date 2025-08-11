@@ -5,8 +5,8 @@ mod sync;
 mod queue_manager;
 
 use std::sync::Arc;
+use std::path::PathBuf;
 use tokio::sync::Mutex as TokioMutex;
-use std::sync::Mutex as StdMutex;
 use voicetextrs::core::transcription::Transcriber;
 use voicetextrs::core::audio::AudioRecorder;
 use queue_manager::QueueManager;
@@ -31,8 +31,13 @@ pub fn run() {
   
   // Pre-initialize the audio stream to avoid delay when recording starts
   println!("Pre-initializing audio stream to avoid recording delay...");
-  recorder.initialize_stream().expect("Failed to initialize audio stream");
-  println!("Audio stream pre-initialized successfully!");
+  match recorder.initialize_stream() {
+    Ok(_) => println!("Audio stream pre-initialized successfully!"),
+    Err(e) => {
+      eprintln!("Warning: Failed to pre-initialize audio stream: {}. Recording will initialize on first use.", e);
+      // Don't panic - the stream will be initialized when recording starts
+    }
+  }
   
   
   let app_state = AppState {
@@ -115,6 +120,42 @@ pub fn run() {
       let db_clone = database.clone();
       tauri::async_runtime::spawn(async move {
         queue_clone.start_worker(db_clone).await;
+      });
+      
+      // Start the sync scheduler for periodic filesystem syncs
+      let queue_clone = queue_manager.clone();
+      let db_clone = database.clone();
+      tauri::async_runtime::spawn(async move {
+        queue_clone.start_sync_scheduler(db_clone).await;
+      });
+      
+      // Start file watcher for real-time sync
+      let db_clone = database.clone();
+      let app_handle = app.handle().clone();
+      // In dev mode, we need to go up two directories from tauri/src-tauri to get to project root
+      let project_root = if cfg!(debug_assertions) {
+          std::env::current_dir()
+              .ok()
+              .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+              .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+              .unwrap_or_else(|| PathBuf::from("."))
+      } else {
+          std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+      };
+      let notes_dir = project_root.join("notes");
+      let imports_dir = project_root.join("imports");
+      
+      log::info!("File watcher paths - Notes: {:?}, Imports: {:?}", notes_dir, imports_dir);
+      
+      tauri::async_runtime::spawn(async move {
+        use sync::file_watcher::FileWatcher;
+        let mut watcher = FileWatcher::new(db_clone, notes_dir, imports_dir);
+        watcher.set_app_handle(app_handle);
+        let watcher = Arc::new(watcher);
+        
+        if let Err(e) = watcher.start_watching().await {
+          log::error!("File watcher failed: {}", e);
+        }
       });
       
       // Add queue manager to managed state

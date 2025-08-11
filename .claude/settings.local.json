@@ -30,7 +30,9 @@
       "Bash(./main.exe --help)",
       "Bash(./download-model.bat)",
       "Bash(cargo:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(cat:*)",
+      "Bash(cp:*)"
     ],
     "deny": []
   }

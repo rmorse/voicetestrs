@@ -119,43 +119,94 @@ voicetextrs/
 - **Clean Architecture**: Backend owns data, frontend uses APIs
 - **Zero Duplicates**: Fixed issue where 66 entries existed for 33 files
 
+## Latest Updates (2025-08-11 Morning)
+
+### ✅ Imports Feature COMPLETE & WORKING!
+The imports feature is now fully functional. Users can drop audio files into `imports/pending/` and they will be:
+1. Automatically detected by file watcher
+2. Moved to `notes/YYYY/YYYY-MM-DD/` with timestamp prefix
+3. Queued for transcription
+4. Successfully transcribed with Whisper
+
+**Test Result**: Successfully imported and transcribed `real-audio-test.wav` → "This is some kind of testing the background, I think."
+
+### 🚀 Major Performance & Architecture Improvements (2025-08-10)
+1. **Removed startup sync** - App no longer performs full filesystem sync on startup
+2. **Background sync scheduler** - Automatic sync every 5 minutes via background tasks
+3. **Imports folder system** - Drop audio files in `imports/pending/` for processing ✅
+4. **Real-time file watching** - Instant detection of new files and changes ✅
+5. **Enhanced task types** - Added FileSystemSync and ProcessImport tasks ✅
+
+### New Features Implemented
+- **File Watcher Service**: Real-time monitoring of notes and imports folders ✅
+- **Import Processing**: Automatic import and transcription of external audio files ✅
+- **Periodic Sync**: Background sync runs every 5 minutes without blocking UI ✅
+- **Enhanced UI**: Background Tasks tab shows import status with icons ✅
+
+## 🔧 Issues to Fix (Priority)
+
+### Database Schema Issues (HIGH PRIORITY)
+1. **Missing `updated_at` column** in transcriptions table
+   - Error: `no such column: updated_at`
+   - Affects: File watcher when updating transcription text
+   
+2. **Foreign Key Constraint Failures**
+   - Error: `FOREIGN KEY constraint failed`
+   - Affects: Sync task enqueueing, import processing
+   - Likely cause: Missing transcription_id references
+
+### Minor Issues (LOW PRIORITY)
+1. **Duplicate task creation** - File watcher creates multiple tasks for same file
+2. **Audio stream initialization** - Warning on some systems (non-blocking)
+3. **Compilation warnings** - Unused imports and variables
+
 ## What's NOT Done Yet
 
 ### ~~Phase 1: Load Historical Transcriptions~~ ✅ COMPLETE!
-1. **Scan existing files** in `notes/` folder
-2. **Populate database** with metadata
-3. **Update UI** to show all transcriptions (not just current session)
-4. **Implement file watcher** for real-time sync
+### ~~Phase 2: Background Task Queue~~ ✅ COMPLETE!
+### ~~Phase 2.5: Background Processing & Imports~~ ✅ COMPLETE! (2025-08-11)
 
-### ~~Phase 2: Background Task Queue~~ ✅ COMPLETE! (2025-08-10)
-1. **Implement QueueManager** with database operations
-2. **Scan for orphaned audio files** (audio without .txt)
-3. **Process queue** sequentially without blocking UI
-4. **Add Background Tasks tab** to UI
+### Phase 3: Database Issues Fix → NEXT PRIORITY
+1. **Add `updated_at` column** to transcriptions table
+2. **Fix foreign key constraints** in background_tasks
+3. **Prevent duplicate task creation**
 
-### Phase 3: Search & Advanced Features →
-1. **Implement search** using FTS5
+### Phase 4: Search & Advanced Features → AFTER DB FIXES
+1. **Implement search UI** - Connect FTS5 backend to frontend
 2. **Add filtering** by date, status
 3. **Export functionality**
 4. **Delete/manage transcriptions**
 
 ## Next Session: Immediate Tasks
 
-### ~~Option A: Load Historical Transcriptions~~ ✅ DONE!
+### Priority 1: Fix Database Schema Issues
+1. Create migration to add `updated_at` column to transcriptions table
+2. Fix foreign key constraints in background_tasks table
+3. Test all database operations
 
-### ~~Option B: Background Queue Implementation~~ ✅ COMPLETE!
-- **QueueManager**: Implemented in `tauri/src-tauri/src/queue_manager.rs`
-- **OrphanScanner**: Integrated into sync module
-- **Background Worker**: Running with task processing
-- **UI Tab**: Background Tasks tab with full controls
+### Priority 2: Clean Up Minor Issues
+1. Fix duplicate task creation in file watcher
+2. Add debouncing to file system events
+3. Clean up compilation warnings
+
+### Priority 3: Begin Search UI Implementation
+1. Connect FTS5 backend to frontend
+2. Add search box to UI
+3. Display search results
 
 ## Key Code Locations
 
 ### Database Operations
 - **Schema**: `tauri/src-tauri/migrations/*.sql`
-- **Models**: `src/core/database.rs`
-- **JS Library**: `tauri/src/lib/database.js`
-- **Commands**: `tauri/src-tauri/src/db_commands.rs` (needs implementation)
+- **Models**: `tauri/src-tauri/src/database/models.rs`
+- **Repository**: `tauri/src-tauri/src/database/repository.rs`
+- **JS API**: `tauri/src/lib/api.js`
+
+### Background Processing
+- **Queue Manager**: `tauri/src-tauri/src/queue_manager.rs`
+- **File Watcher**: `tauri/src-tauri/src/sync/file_watcher.rs`
+- **Import Processor**: `tauri/src-tauri/src/sync/imports.rs`
+- **UI Tab**: `tauri/src/BackgroundTasksTab.jsx`
 
 ### Recording System
 - **Audio**: `src/core/audio.rs` - Pre-initialization working
@@ -166,13 +217,19 @@ voicetextrs/
 - ✅ SQLx backend database with clean API
 - ✅ Smart filesystem sync with duplicate prevention
 - ✅ Path normalization and ID standardization
-- ✅ All 33 transcriptions properly loaded
-- ✅ No duplicate database entries
+- ✅ Background processing with queue management
+- ✅ Imports folder for external audio files
+- ✅ Real-time file watching and sync
+- ✅ Periodic background sync (every 5 minutes)
 - ✅ Full-text search capability (backend ready)
+- ✅ No startup sync - fast app launch
 
-### Remaining Tasks (Phase 3)
+### Remaining Tasks
+- ~~Real-time file watcher~~ ✅ COMPLETE!
+- ~~Imports feature~~ ✅ COMPLETE!
+- Database schema fixes (HIGH PRIORITY)
 - Search UI connection (backend ready, needs UI)
-- Real-time file watcher (for auto-sync)
+- Date/status filtering
 - Export functionality
 - Delete/manage transcriptions UI
 

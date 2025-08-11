@@ -19,6 +19,13 @@ pub enum TaskType {
         audio_path: String,
         original_name: String,
     },
+    FileSystemSync {
+        full_scan: bool,
+    },
+    ProcessImport {
+        import_path: String,
+        target_dir: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -70,7 +77,9 @@ pub struct QueueManager {
     active_task: Arc<RwLock<Option<BackgroundTask>>>,
     transcriber: Arc<Transcriber>,
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    sync_scheduler_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     app_handle: Option<tauri::AppHandle>,
+    database: Arc<Mutex<Option<Arc<crate::database::Database>>>>,
 }
 
 impl QueueManager {
@@ -81,7 +90,9 @@ impl QueueManager {
             active_task: Arc::new(RwLock::new(None)),
             transcriber,
             worker_handle: Arc::new(Mutex::new(None)),
+            sync_scheduler_handle: Arc::new(Mutex::new(None)),
             app_handle: None,
+            database: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -95,6 +106,9 @@ impl QueueManager {
             return;
         }
 
+        // Store the database reference
+        *self.database.lock().await = Some(database.clone());
+        
         self.is_running.store(true, Ordering::Relaxed);
         
         let is_paused = self.is_paused.clone();
@@ -142,7 +156,7 @@ impl QueueManager {
                         }
 
                         // Process the task
-                        let result = Self::process_task(&task, &transcriber).await;
+                        let result = Self::process_task(&task, &transcriber, &database).await;
                         
                         // Update task based on result
                         match result {
@@ -213,6 +227,76 @@ impl QueueManager {
         if let Some(handle) = self.worker_handle.lock().await.take() {
             let _ = handle.await;
         }
+        
+        // Also stop the sync scheduler
+        if let Some(handle) = self.sync_scheduler_handle.lock().await.take() {
+            let _ = handle.await;
+        }
+    }
+
+    pub async fn start_sync_scheduler(&self, database: Arc<crate::database::Database>) {
+        let db = database.clone();
+        let is_running = self.is_running.clone();
+        
+        let handle = tokio::spawn(async move {
+            log::info!("Starting filesystem sync scheduler");
+            
+            // Run initial sync after 30 seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            
+            while is_running.load(Ordering::Relaxed) {
+                // Schedule a filesystem sync task
+                if let Err(e) = Self::enqueue_sync_task(&db, false).await {
+                    log::error!("Failed to enqueue sync task: {}", e);
+                }
+                
+                // Wait 5 minutes before next sync
+                tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+            }
+            
+            log::info!("Sync scheduler stopped");
+        });
+        
+        *self.sync_scheduler_handle.lock().await = Some(handle);
+    }
+
+    async fn enqueue_sync_task(database: &crate::database::Database, full_scan: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let pool = database.pool();
+        
+        // Check if a sync task is already pending or processing
+        let existing = sqlx::query(
+            "SELECT COUNT(*) as count FROM background_tasks 
+             WHERE payload LIKE '%FileSystemSync%' 
+             AND status IN ('pending', 'processing')"
+        )
+        .fetch_one(pool)
+        .await?;
+        
+        let count: i64 = existing.get("count");
+        if count > 0 {
+            log::debug!("Sync task already in queue, skipping");
+            return Ok(());
+        }
+        
+        // Create a new sync task
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let payload = serde_json::json!({
+            "type": "FileSystemSync",
+            "full_scan": full_scan
+        });
+        
+        sqlx::query(
+            "INSERT INTO background_tasks (id, transcription_id, task_type, priority, status, payload, created_at, retry_count, max_retries)
+             VALUES (?, ?, 'FileSystemSync', 0, 'pending', ?, datetime('now'), 0, 1)"
+        )
+        .bind(&task_id)
+        .bind(&task_id) // Use task_id as transcription_id for system tasks
+        .bind(payload.to_string())
+        .execute(pool)
+        .await?;
+        
+        log::info!("Enqueued filesystem sync task (full_scan: {})", full_scan);
+        Ok(())
     }
 
     pub fn pause(&self) {
@@ -250,13 +334,36 @@ impl QueueManager {
             .await?;
 
         if let Some(row) = row {
+            // Parse task type from string and payload
+            let task_type_str: String = row.get("task_type");
+            let payload: serde_json::Value = serde_json::from_str(row.get("payload")).unwrap_or(serde_json::Value::Null);
+            
+            let task_type = match task_type_str.as_str() {
+                "TranscribeOrphan" => TaskType::TranscribeOrphan {
+                    audio_path: payload["audio_path"].as_str().unwrap_or("").to_string(),
+                    output_path: payload["output_path"].as_str().unwrap_or("").to_string(),
+                },
+                "TranscribeImported" => TaskType::TranscribeImported {
+                    audio_path: payload["audio_path"].as_str().unwrap_or("").to_string(),
+                    original_name: payload["original_name"].as_str().unwrap_or("").to_string(),
+                },
+                "FileSystemSync" => TaskType::FileSystemSync {
+                    full_scan: payload["full_scan"].as_bool().unwrap_or(false),
+                },
+                "ProcessImport" => TaskType::ProcessImport {
+                    import_path: payload["import_path"].as_str().unwrap_or("").to_string(),
+                    target_dir: payload["target_path"].as_str().unwrap_or("").to_string(),
+                },
+                _ => TaskType::TranscribeOrphan {
+                    audio_path: String::new(),
+                    output_path: String::new(),
+                },
+            };
+            
             let task = BackgroundTask {
                 id: row.get("id"),
                 transcription_id: row.get("transcription_id"),
-                task_type: serde_json::from_str(row.get("task_type")).unwrap_or(TaskType::TranscribeOrphan {
-                    audio_path: String::new(),
-                    output_path: String::new(),
-                }),
+                task_type,
                 priority: match row.get::<i32, _>("priority") {
                     0 => TaskPriority::Low,
                     1 => TaskPriority::Normal,
@@ -270,7 +377,7 @@ impl QueueManager {
                 retry_count: row.get::<i32, _>("retry_count") as u32,
                 max_retries: row.get::<i32, _>("max_retries") as u32,
                 error_message: row.get("error_message"),
-                payload: serde_json::from_str(row.get("payload")).unwrap_or(serde_json::Value::Null),
+                payload,
             };
             
             Ok(Some(task))
@@ -279,7 +386,7 @@ impl QueueManager {
         }
     }
 
-    async fn process_task(task: &BackgroundTask, transcriber: &Transcriber) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn process_task(task: &BackgroundTask, transcriber: &Transcriber, database: &Arc<crate::database::Database>) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         match &task.task_type {
             TaskType::TranscribeOrphan { audio_path, output_path } |
             TaskType::TranscribeImported { audio_path, original_name: output_path } => {
@@ -297,6 +404,63 @@ impl QueueManager {
                 std::fs::write(&output_path, &result.text)?;
                 
                 Ok(result.text)
+            }
+            TaskType::FileSystemSync { full_scan: _ } => {
+                // Perform filesystem sync using the sync module
+                use crate::sync::FileSystemSync;
+                
+                let notes_dir = std::env::current_dir()
+                    .map(|p| p.parent().unwrap_or(&p).join("notes"))
+                    .unwrap_or_else(|_| PathBuf::from("notes"));
+                
+                let sync = FileSystemSync::new(database.clone(), notes_dir);
+                let report = sync.sync_filesystem().await?;
+                
+                log::info!("FileSystemSync completed: {} new, {} updated, {} missing", 
+                    report.new_transcriptions, report.updated_transcriptions, report.missing_files);
+                
+                Ok(format!("Sync complete: {} files processed", report.total_files_found))
+            }
+            TaskType::ProcessImport { import_path, target_dir } => {
+                // Process import file
+                let import_path = PathBuf::from(import_path);
+                let target_path = PathBuf::from(target_dir);
+                
+                if !import_path.exists() {
+                    return Err(format!("Import file not found: {:?}", import_path).into());
+                }
+                
+                // Create target directory if needed
+                if let Some(parent) = target_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                
+                // Move the file to target location
+                std::fs::rename(&import_path, &target_path)?;
+                
+                // Queue for transcription
+                let transcription_id = uuid::Uuid::new_v4().to_string();
+                let output_path = target_path.with_extension("txt");
+                
+                // Add transcription task
+                let payload = serde_json::json!({
+                    "type": "TranscribeImported",
+                    "audio_path": target_path.to_string_lossy(),
+                    "output_path": output_path.to_string_lossy(),
+                });
+                
+                sqlx::query(
+                    "INSERT INTO background_tasks (id, transcription_id, task_type, priority, status, payload, created_at, retry_count, max_retries)
+                     VALUES (?, ?, 'TranscribeImported', 1, 'pending', ?, datetime('now'), 0, 2)"
+                )
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(&transcription_id)
+                .bind(payload.to_string())
+                .execute(database.pool())
+                .await?;
+                
+                log::info!("Import processed and queued for transcription: {}", target_path.display());
+                Ok(format!("Import processed: {}", target_path.display()))
             }
         }
     }
@@ -458,13 +622,36 @@ impl QueueManager {
 
         let mut tasks = Vec::new();
         for row in rows {
+            // Parse task type from string and payload
+            let task_type_str: String = row.get("task_type");
+            let payload: serde_json::Value = serde_json::from_str(row.get("payload")).unwrap_or(serde_json::Value::Null);
+            
+            let task_type = match task_type_str.as_str() {
+                "TranscribeOrphan" => TaskType::TranscribeOrphan {
+                    audio_path: payload["audio_path"].as_str().unwrap_or("").to_string(),
+                    output_path: payload["output_path"].as_str().unwrap_or("").to_string(),
+                },
+                "TranscribeImported" => TaskType::TranscribeImported {
+                    audio_path: payload["audio_path"].as_str().unwrap_or("").to_string(),
+                    original_name: payload["original_name"].as_str().unwrap_or("").to_string(),
+                },
+                "FileSystemSync" => TaskType::FileSystemSync {
+                    full_scan: payload["full_scan"].as_bool().unwrap_or(false),
+                },
+                "ProcessImport" => TaskType::ProcessImport {
+                    import_path: payload["import_path"].as_str().unwrap_or("").to_string(),
+                    target_dir: payload["target_path"].as_str().unwrap_or("").to_string(),
+                },
+                _ => TaskType::TranscribeOrphan {
+                    audio_path: String::new(),
+                    output_path: String::new(),
+                },
+            };
+            
             let task = BackgroundTask {
                 id: row.get("id"),
                 transcription_id: row.get("transcription_id"),
-                task_type: serde_json::from_str(row.get("task_type")).unwrap_or(TaskType::TranscribeOrphan {
-                    audio_path: String::new(),
-                    output_path: String::new(),
-                }),
+                task_type,
                 priority: match row.get::<i32, _>("priority") {
                     0 => TaskPriority::Low,
                     1 => TaskPriority::Normal,
@@ -487,7 +674,7 @@ impl QueueManager {
                 retry_count: row.get::<i32, _>("retry_count") as u32,
                 max_retries: row.get::<i32, _>("max_retries") as u32,
                 error_message: row.get("error_message"),
-                payload: serde_json::from_str(row.get("payload")).unwrap_or(serde_json::Value::Null),
+                payload,
             };
             
             tasks.push(task);
